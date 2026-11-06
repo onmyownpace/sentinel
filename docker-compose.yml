@@ -1,0 +1,29 @@
+# Milestone 1 runs one service: PostgreSQL.
+# The API and the Next.js app run on the host so code reloads stay simple.
+# Redis, workers, and other services are intentionally absent.
+
+name: sentinel
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - sentinel_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # $$ keeps Compose from eating the variable. The shell inside the
+      # container expands POSTGRES_USER and POSTGRES_DB.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  sentinel_postgres_data:

@@ -1,0 +1,109 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f4f6f8;
+  --text: #1b1f24;
+  --muted: #5c6770;
+  --card: #ffffff;
+  --line: #d5dbe3;
+  --ok: #0d6b45;
+  --bad: #9b2c2c;
+  --font: "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14181d;
+    --text: #e7ebf0;
+    --muted: #a7b0ba;
+    --card: #1c2229;
+    --line: #323a44;
+    --ok: #8ed0b0;
+    --bad: #f0b0b0;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  line-height: 1.5;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem;
+}
+
+h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+p {
+  margin: 0 0 1rem;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem 1.25rem 0.5rem;
+}
+
+dl {
+  margin: 0;
+}
+
+dl > div {
+  display: grid;
+  grid-template-columns: 9.5rem 1fr;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--line);
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.ok {
+  color: var(--ok);
+}
+
+.bad {
+  color: var(--bad);
+}
+
+.hint {
+  color: var(--muted);
+  margin: 0.9rem 0 0.75rem;
+}
+
+a {
+  color: var(--text);
+}
+
+@media (max-width: 480px) {
+  dl > div {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+}

@@ -1,0 +1,37 @@
+[project]
+name = "sentinel-api"
+version = "0.1.0"
+description = "HTTP API for Sentinel, a website testing and monitoring platform."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "sqlalchemy[asyncio]>=2.0.36",
+  "asyncpg>=0.30",
+  "pydantic-settings>=2.6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  # Starlette's TestClient imports httpx2. The older httpx package still
+  # works, but current Starlette warns that it is deprecated for this use.
+  "httpx2>=2.16",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app", "app.api", "app.api.routes", "app.core"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+  "integration: talks to the PostgreSQL instance in DATABASE_URL",
+]
