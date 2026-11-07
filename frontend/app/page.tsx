@@ -20,8 +20,8 @@ export default async function HomePage() {
     <main>
       <h1>Sentinel</h1>
       <p>
-        Foundation milestone. This page asks the API whether the process is up
-        and whether PostgreSQL answered a connectivity check.
+        This page asks the API whether the process is up and whether
+        PostgreSQL answered a connectivity check.
       </p>
 
       <section className="card" aria-label="Runtime status">

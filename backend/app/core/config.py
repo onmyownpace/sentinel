@@ -32,8 +32,10 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     environment: str = "development"
     database_url: str = "postgresql+asyncpg://sentinel:sentinel@localhost:5432/sentinel"
-    # Comma-separated list. The frontend origin is the only caller for now.
-    cors_origins: str = "http://localhost:3000"
+    # Comma-separated browser origins. The status page calls the API from the
+    # Next.js server. The website registry calls it from the browser, so the
+    # origin of the page has to be listed. localhost and 127.0.0.1 differ.
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     @field_validator("database_url")
     @classmethod

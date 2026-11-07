@@ -2,7 +2,7 @@
   "name": "sentinel-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Web interface for Sentinel. Milestone 1 is a status page for the API.",
+  "description": "Web interface for Sentinel. Milestone 2 adds a website registry beside the status page.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
