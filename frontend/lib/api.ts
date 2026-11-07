@@ -1,8 +1,8 @@
 /**
  * Server-side reader for the Sentinel API health endpoints.
  *
- * This module runs in the Next.js server process. The browser receives the
- * rendered HTML and does not call the API itself in this milestone.
+ * This module runs in the Next.js server while the status page is rendered.
+ * The website registry uses `lib/websites.ts` and calls the API from the browser.
  */
 
 const DEFAULT_API_URL = "http://localhost:8000";

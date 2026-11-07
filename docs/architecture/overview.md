@@ -2,13 +2,7 @@
 
 Sentinel is the start of a website testing and monitoring platform. A person will eventually describe a site to watch, the platform will open that site in a browser, and later steps will interpret the result and notify other tools.
 
-This milestone does not do that work. It creates the place where that work will live, and it proves three things:
-
-1. The API process can start and answer an HTTP request.
-2. The API can open a PostgreSQL connection with SQLAlchemy.
-3. The web app can render what the API reports.
-
-Those three things are the foundation. Features built on top of them should not need a new repository layout.
+Milestone 1 proved three things: the API can answer HTTP, it can open PostgreSQL, and the web app can render that report. Milestone 2 stores websites on that foundation. It still does not open a browser, interpret a failure, or notify another tool. There is one shared registry and no user accounts.
 
 ## How to read the repository
 
@@ -27,12 +21,17 @@ Sentinel/
 │   └── learning/development-environment.md
 ├── backend/
 │   ├── pyproject.toml
+│   ├── alembic.ini
+│   ├── alembic/
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── api/routes/health.py
-│   │   └── core/
-│   │       ├── config.py
-│   │       └── database.py
+│   │   ├── api/routes/websites.py
+│   │   ├── core/
+│   │   │   ├── config.py
+│   │   │   ├── database.py
+│   │   │   └── urls.py
+│   │   └── models/website.py
 │   └── tests/
 └── frontend/
     ├── package.json
@@ -45,8 +44,12 @@ Sentinel/
     ├── app/
     │   ├── layout.tsx
     │   ├── page.tsx
+    │   ├── websites/page.tsx
     │   └── globals.css
-    └── lib/api.ts
+    ├── components/
+    └── lib/
+        ├── api.ts
+        └── websites.ts
 ```
 
 | Path | Purpose |
@@ -56,10 +59,15 @@ Sentinel/
 | `backend/app/main.py` | Builds the FastAPI application, CORS, logging, and the database lifecycle. |
 | `backend/app/core/config.py` | Loads settings from the environment and the root `.env` file. |
 | `backend/app/core/database.py` | Creates the async engine and session factory, and runs the connectivity query. |
-| `backend/app/api/routes/health.py` | The only HTTP routes in this milestone. |
-| `backend/tests/` | Automated checks for configuration and the health routes. |
-| `frontend/app/page.tsx` | The only page. It shows the API's health report. |
+| `backend/app/api/routes/health.py` | Liveness and readiness routes. |
+| `backend/app/api/routes/websites.py` | Create, list, read, and delete registered websites. |
+| `backend/app/models/website.py` | The `websites` table. |
+| `backend/alembic/` | Schema revisions. `0001_create_websites` creates that table. |
+| `backend/tests/` | Automated checks for configuration, health, URL rules, and the registry. |
+| `frontend/app/page.tsx` | The status page. |
+| `frontend/app/websites/page.tsx` | The website registry page. |
 | `frontend/lib/api.ts` | Server-side fetch of `/health` and `/health/ready`. |
+| `frontend/lib/websites.ts` | Browser calls to `/api/websites`, plus the form's input checks. |
 | `docs/` | Explanations that should stay accurate as the code changes. |
 
 `backend/.venv/` and `frontend/node_modules/` are created on your machine. They are not part of the design, and git ignores them.
@@ -205,9 +213,39 @@ The env-file path is computed from the location of `config.py`, not from the she
 
 `database_is_reachable()` runs `SELECT 1`. Any exception becomes `False`. The exception text is not logged and is not returned to the client. asyncpg error text can contain the database URL, and the URL contains the password.
 
-`create_session_factory()` builds the factory future routes will use to open a transaction. No route opens a session yet, because nothing is being saved. The factory is created at startup so the lifecycle is real, and a test asserts that startup attached it to the app. `expire_on_commit=False` is set now because async SQLAlchemy cannot lazily refresh expired attributes later. Forgetting that flag is a common first bug once inserts exist.
+`create_session_factory()` builds the factory website routes use to open a transaction. `expire_on_commit=False` keeps loaded attributes usable after a commit. Async code cannot refresh them with an implicit lazy load, so a route that needs database-generated timestamps calls `session.refresh()` after `commit()`.
 
-There are no tables, no ORM models, and no migration tool. A schema with nothing to store would only be a fictional design. The first feature that needs to remember something should add the table and a migration together.
+### Website registry
+
+`Website` in `backend/app/models/website.py` is the only mapped table. The columns are `id` (UUID primary key), `name` (up to 120 characters), `base_url` (up to 2048 characters), `created_at`, and `updated_at`. `base_url` is unique. Database checks require a non-blank name and a base URL that starts with `http://` or `https://`.
+
+`normalize_base_url()` in `backend/app/core/urls.py` is the application rule behind that column. It accepts only HTTP and HTTPS, rejects userinfo, queries, and fragments, lowercases the scheme and host, and drops a trailing slash and a default port. `https://Example.com:443/docs/` and `https://example.com/docs` are one site.
+
+Alembic revision `0001_create_websites` creates the table. Run `alembic upgrade head` from `backend`. The API does not migrate on startup. If the table is missing, website routes return `503` with a schema message and do not include the driver error.
+
+`POST /api/websites` returns `201` and the stored row. A second site with the same normalized URL returns `409`. `GET /api/websites` returns the rows newest first. `GET` and `DELETE` on `/api/websites/{website_id}` return `404` when the UUID is absent. An id that is not a UUID returns `422` before a query runs. Connection failures return `503` and the response does not contain the database URL.
+
+There is no owner column. Every caller of this development process sees the same rows.
+
+```mermaid
+sequenceDiagram
+  participant Browser
+  participant API as FastAPI
+  participant DB as PostgreSQL
+
+  Browser->>API: POST /api/websites
+  API->>API: normalize name and base URL
+  API->>DB: INSERT
+  alt new URL
+    DB-->>API: row
+    API-->>Browser: 201 JSON
+  else URL already stored
+    DB-->>API: unique violation
+    API-->>Browser: 409
+  end
+```
+
+The page at `/websites` is a client component. It checks the form before sending, then calls the API with `fetch`. Loading, success, and error text are separate. Delete asks for confirmation in the row before it sends `DELETE`.
 
 ### Health routes
 
@@ -241,6 +279,8 @@ Tests are part of the foundation, not a later cleanup.
 - `test_config.py` rejects a database URL that would select the synchronous driver.
 - `test_health.py` locks the liveness body, the CORS header for `http://localhost:3000`, and both readiness outcomes. The success and failure outcomes are forced with a monkeypatch so they do not depend on Docker. A further test points the engine at `127.0.0.1:1` with a distinctive password and requires the `503` body to contain neither the password nor the URL.
 - `test_database.py` is marked `integration`. It runs `SELECT 1` against `DATABASE_URL`. If the driver cannot connect, the test skips and prints the exception type. That skip must not be reported as a passing database check.
+- `test_urls.py` locks URL normalization and rejection without a database.
+- `test_websites.py` applies the Alembic revision, then checks create, list, read, delete, duplicate URLs, missing rows, and a closed-port failure that must not echo the password. Persistence tests delete only the rows they insert.
 
 ## Design decisions
 
@@ -252,9 +292,11 @@ Tests are part of the foundation, not a later cleanup.
 
 **Host processes for the API and the web, Docker only for PostgreSQL.** Edit-and-reload is simpler when Uvicorn and Next.js are local processes. PostgreSQL is the stateful piece, so it is the piece Compose owns. Adding more containers before they earn their keep makes logs and networking harder to teach.
 
-**No Redis and no Celery.** Nothing in this milestone outlives a single request except the database pool. A queue would be an empty service. Background work can be reconsidered when a check needs to run outside the web request.
+**No Redis and no Celery.** Saved websites live in PostgreSQL. A queue would still be an empty service. Background work can be reconsidered when a check needs to run outside the web request.
 
-**Fail closed, and stay quiet about why.** Readiness returns `unavailable` for every connection failure: refused, timed out, wrong password, missing database. Callers do not need the driver taxonomy. Operators can look at the API log, which records the exception class name and not the message.
+**Fail closed, and stay quiet about why.** Readiness returns `unavailable` for every connection failure: refused, timed out, wrong password, missing database. Website routes return `503` for those failures and do not include the driver text. Callers do not need the driver taxonomy. Operators can look at the API log, which records the exception class name and not the message.
+
+**One shared registry.** Milestone 2 does not invent users to own each row. Authentication can be added when there is a real account model, instead of a placeholder user on every website.
 
 **One settings cache.** Request handlers do not re-read the environment. That makes behavior stable for the life of the process and makes tests responsible for clearing `get_settings.cache_clear()` when they change an environment variable.
 
@@ -271,8 +313,9 @@ Declared directly, because each one is a choice. Versions below are the ones `pi
 | `fastapi` | 0.162.0 | HTTP routes, request validation, and the generated docs at `/docs`. |
 | `uvicorn[standard]` | 0.54.0 | Process that serves the ASGI app. The `standard` extra adds reload and faster protocol implementations used by `--reload`. |
 | `sqlalchemy[asyncio]` | 2.1.8 | Engine, connection pool, and `SELECT 1`. The `asyncio` extra adds `greenlet` 3.5.6. |
-| `asyncpg` | 0.32.0 | PostgreSQL driver used by the async engine. |
+| `asyncpg` | 0.32.0 | PostgreSQL driver used by the async engine and by Alembic. |
 | `pydantic-settings` | 2.16.2 | Reads environment variables and `.env` into a typed `Settings` object. |
+| `alembic` | 1.20.1 | Schema revisions. It also installs Mako, which renders revision templates. |
 
 FastAPI also installed Starlette 1.10.0, Pydantic 2.14.3, and `python-dotenv` 1.2.4. Those are libraries our direct dependencies need. Application code imports FastAPI, Pydantic models, and `pydantic-settings`, not Starlette itself. OpenTelemetry's API package is pulled in by this FastAPI release. Sentinel does not configure tracing. It is not a product dependency.
 
@@ -289,7 +332,7 @@ FastAPI also installed Starlette 1.10.0, Pydantic 2.14.3, and `python-dotenv` 1.
 | Package | Installed | Why it is here |
 | --- | --- | --- |
 | `next` | 16.4.5 | React framework. App Router, server rendering, and the dev server. |
-| `react`, `react-dom` | 19.3.1 | UI runtime. This milestone has one server-rendered page. |
+| `react`, `react-dom` | 19.3.1 | UI runtime. The status page is server-rendered. The registry is a client component. |
 | `typescript` | 7.0.2 | Typecheck via `npm run typecheck`. |
 | `@types/node` | 26.6.6 | Types for Node APIs such as `process.env`. |
 | `@types/react`, `@types/react-dom` | 19.3.0 | Types for the page and layout. |
@@ -298,7 +341,7 @@ FastAPI also installed Starlette 1.10.0, Pydantic 2.14.3, and `python-dotenv` 1.
 
 ### Not installed
 
-Playwright, the OpenAI SDK, an n8n deployment, Redis, Celery, and a migration tool such as Alembic. Add a migration tool with the first table, not before.
+Playwright, the OpenAI SDK, an n8n deployment, Redis, and Celery. Alembic is installed because the `websites` table needs a revision.
 
 ## Version identity
 

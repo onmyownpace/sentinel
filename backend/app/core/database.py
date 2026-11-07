@@ -38,8 +38,9 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
     """Factory for request-scoped sessions.
 
     `expire_on_commit=False` keeps loaded attributes usable after a commit.
-    Async code cannot refresh them with an implicit lazy load. No route
-    commits anything yet; the factory is ready for the first persisted feature.
+    Async code cannot refresh them with an implicit lazy load. Website routes
+    commit through a session from this factory, then refresh explicitly when
+    they need database-generated values such as timestamps.
     """
     return async_sessionmaker(engine, expire_on_commit=False)
 

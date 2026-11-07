@@ -121,11 +121,14 @@ The default user, password, and database name are all `sentinel`. That password 
 
 ## Start the API
 
-From `backend`:
+From `backend`, apply the schema and then start the API:
 
 ```powershell
+.\.venv\Scripts\python.exe -m alembic upgrade head
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+`alembic upgrade head` creates the `websites` table when it is missing. The API does not run migrations on startup. Without that table, website routes return `503` and tell you the schema is not ready. `/health` still returns `200`.
 
 `--reload` restarts the process when a Python file changes. Settings are read at startup, so a change to `.env` is picked up on the next reload.
 
@@ -172,7 +175,7 @@ Restart `npm run dev` after changing that file. Next.js reads frontend env files
 
 The first `npm run dev` may adjust `frontend/tsconfig.json`. This Next.js version requires `jsx` set to `react-jsx` and adds its generated type folders to `include`. Those edits are already in the repository. `frontend/next.config.ts` sets `turbopack.root` to the frontend directory so the dev server does not walk upward and treat a `package-lock.json` in a parent folder as the project. Next.js also writes `frontend/AGENTS.md` when the dev server starts. That file is a note about this Next.js release for coding agents. Sentinel's own architecture stays in `docs/`.
 
-`NEXT_PUBLIC_` means the value is allowed to appear in browser code. This milestone only uses it on the server, but the prefix is still right: the API address is not a secret.
+`NEXT_PUBLIC_` means the value is allowed to appear in browser code. The status page reads it on the server. The website registry reads it in the browser. The API address is not a secret.
 
 ## What happens when you refresh the page
 
@@ -182,7 +185,7 @@ Follow this once with the files open.
 2. `frontend/app/page.tsx` calls `getApiSnapshot()` in `frontend/lib/api.ts`. The page is a server component, so this function runs in the Next.js process.
 3. `resolveApiUrl()` reads `NEXT_PUBLIC_API_URL` or uses `http://localhost:8000`.
 4. `fetch` calls `GET /health`, then `GET /health/ready`, each with an eight-second limit. `cache: "no-store"` prevents Next.js from reusing an old health document. The limit is longer than the API's two-second database connect timeout so a refused database still produces a `503` the page can show.
-5. The browser's cross-origin rules are not involved in this hop. The caller is the Next.js server, not the page in the browser. CORS still matters, and is tested, because a later browser-side call will need it.
+5. The browser's cross-origin rules are not involved in this hop. The caller is the Next.js server. CORS matters on `/websites`, where the browser calls the API directly. That header is tested.
 6. Uvicorn hands the request to the FastAPI app built in `backend/app/main.py`.
 7. `GET /health` in `backend/app/api/routes/health.py` returns the process identity. It does not ask for a database connection.
 8. `GET /health/ready` takes the engine from `app.state` and calls `database_is_reachable()` in `backend/app/core/database.py`.

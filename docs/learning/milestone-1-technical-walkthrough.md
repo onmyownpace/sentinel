@@ -1,6 +1,6 @@
-# Milestone 1 technical walkthrough
+# Technical walkthrough
 
-This document explains the code that is in the repository today. It is a reading guide for the foundation milestone: a FastAPI process, a Next.js status page, and one PostgreSQL container.
+This document explains the code that is in the repository today. Sections 1 through 11 are the foundation: a FastAPI process, a Next.js status page, and one PostgreSQL container. Section 12 is the website registry built on that foundation.
 
 Read it next to the files it names. When a section says a function does something, that function is the place to confirm it.
 
@@ -9,9 +9,11 @@ What this checkout actually does:
 - `GET /health` reports that the API process can answer HTTP.
 - `GET /health/ready` runs `SELECT 1` and reports whether PostgreSQL answered.
 - The page at `/` asks the Next.js server to call those two routes and render the result.
-- Pytest checks that contract. One test runs `SELECT 1` against the database in `DATABASE_URL`.
+- `POST`, `GET`, and `DELETE` under `/api/websites` store one shared list of sites.
+- The page at `/websites` calls those routes from the browser.
+- Pytest checks both contracts. One test runs `SELECT 1` against the database in `DATABASE_URL`. The registry tests apply the Alembic revision and then delete the rows they insert.
 
-There is no saved monitor, user account, browser runner, or call to an external AI service in this code. If you cannot find a feature in the files below, it is not part of this milestone.
+There is no saved monitor, user account, browser runner, or call to an external AI service in this code. Websites are remembered. Nobody owns them yet. If you cannot find a feature in the files below, it is not implemented.
 
 Setup commands for this machine live in [the development-environment guide](development-environment.md). This walkthrough explains why those commands work.
 
@@ -35,18 +37,26 @@ Sentinel/
 │   └── learning/
 ├── backend/
 │   ├── pyproject.toml          Python dependencies and pytest settings
+│   ├── alembic.ini             migration configuration
+│   ├── alembic/                revisions, including websites
 │   ├── app/
 │   │   ├── main.py             application factory
 │   │   ├── api/routes/health.py
-│   │   └── core/
-│   │       ├── config.py
-│   │       └── database.py
+│   │   ├── api/routes/websites.py
+│   │   ├── core/
+│   │   │   ├── config.py
+│   │   │   ├── database.py
+│   │   │   └── urls.py
+│   │   └── models/website.py
 │   └── tests/
 └── frontend/
     ├── package.json
     ├── next.config.ts
-    ├── app/                    the website
-    └── lib/api.ts              server-side calls to the API
+    ├── app/                    status page and /websites
+    ├── components/             header, form, and list
+    └── lib/
+        ├── api.ts              server-side health calls
+        └── websites.ts         browser calls for the registry
 ```
 
 | Path | Role in the running system |
@@ -54,13 +64,17 @@ Sentinel/
 | `backend/app/main.py` | Builds the FastAPI object Uvicorn serves. |
 | `backend/app/core/config.py` | Reads environment variables and the root `.env` file. |
 | `backend/app/core/database.py` | Creates the SQLAlchemy engine and runs `SELECT 1`. |
-| `backend/app/api/routes/health.py` | The only HTTP routes. |
+| `backend/app/api/routes/health.py` | Liveness and readiness. |
+| `backend/app/api/routes/websites.py` | The website registry routes. |
+| `backend/app/models/website.py` | The ORM model and database constraints. |
 | `backend/tests/` | Automated checks. They are not imported by the running API. |
-| `frontend/app/page.tsx` | The only page. |
-| `frontend/lib/api.ts` | Fetches `/health` and `/health/ready` while the page is rendering. |
+| `frontend/app/page.tsx` | The status page. |
+| `frontend/app/websites/page.tsx` | The registry page. |
+| `frontend/lib/api.ts` | Fetches `/health` and `/health/ready` while the status page is rendering. |
+| `frontend/lib/websites.ts` | Typed browser requests for the registry. |
 | `docker-compose.yml` | Starts PostgreSQL. It does not start the API or the website. |
 
-`pyproject.toml` lists the Python packages `setuptools` installs: `app`, `app.api`, `app.api.routes`, and `app.core`. Tests are outside that list. They run because pytest is pointed at `backend/tests`, not because they are part of the installed package.
+`pyproject.toml` lists the Python packages `setuptools` installs: `app`, `app.api`, `app.api.routes`, `app.core`, and `app.models`. Tests are outside that list. They run because pytest is pointed at `backend/tests`, not because they are part of the installed package.
 
 The website imports its own code with the TypeScript path `@/*`, defined in `frontend/tsconfig.json` as `./*`. `import { getApiSnapshot } from "@/lib/api"` means `frontend/lib/api.ts`.
 
@@ -272,7 +286,7 @@ Importing the module does not connect. The pool connects on first use.
 - `pool_pre_ping=True`. Before SQLAlchemy hands out a pooled connection, it checks that the connection is still alive. That matters when the container restarts while the API process keeps running.
 - `connect_args={"timeout": 2}`. asyncpg treats `timeout` as the connection timeout, in seconds. A database that does not answer fails the readiness request in about two seconds.
 
-`create_session_factory` sets `expire_on_commit=False`. After a commit, SQLAlchemy would otherwise expire loaded attributes and try to refresh them on the next read. That refresh is a lazy load, and async code cannot do an implicit lazy load. No route commits anything today. The factory is created at startup and stored on `app.state`. `test_startup_creates_engine_and_session_factory` asserts both objects exist. No route calls the factory.
+`create_session_factory` sets `expire_on_commit=False`. After a commit, SQLAlchemy would otherwise expire loaded attributes and try to refresh them on the next read. That refresh is a lazy load, and async code cannot do an implicit lazy load. Website routes open a session from `app.state.session_factory`, commit, and call `session.refresh()` when they need `created_at` and `updated_at`. Health routes do not open a session. `test_startup_creates_engine_and_session_factory` asserts both objects exist. It still does not run SQL.
 
 `database_is_reachable` uses `sqlalchemy.text("SELECT 1")`. Any exception becomes `False`. The `except` block logs the exception class name only:
 
@@ -282,7 +296,7 @@ logger.warning("Database readiness check failed (%s)", exc.__class__.__name__)
 
 asyncpg can include the database URL in an error string. The URL contains the password. The class name (`TimeoutError`, `InvalidPasswordError`, and so on, once SQLAlchemy wraps it) is the clue that is safe to log.
 
-There are no tables and no migration files. `SELECT 1` does not need a table.
+`SELECT 1` does not need a table. The `websites` table is created by Alembic, not by this readiness check. See section 12.
 
 ### Data flow for one connectivity check
 
@@ -329,7 +343,7 @@ A successful run prints `1`. If it raises, read the exception class first. Then 
 
 ### Mistakes
 
-- Treating the session factory as proof that data is being saved. Nothing inserts a row.
+- Treating the session factory as proof that a particular route saved a row. Health does not use it. The website routes do.
 - Raising the driver's exception from `database_is_reachable`. The health route would then turn a down database into an unhandled `500`, and the response might contain the URL.
 - Setting the page's fetch timeout to the same two seconds. The driver may use the whole two seconds and a little more before it returns `503`. The page waits eight seconds so it can still read that response. Those two numbers live in `database.py` (`_CONNECT_TIMEOUT_SECONDS`) and `frontend/lib/api.ts` (`REQUEST_TIMEOUT_MS`).
 
@@ -599,18 +613,18 @@ Stop PostgreSQL only. Refresh. The API line stays `ok (200)`. The database line 
 
 ### The idea
 
-Next.js, in this repository, is a React framework with the App Router. A folder named `app` contains routes. `app/page.tsx` is the route `/`. `app/layout.tsx` is the document wrapped around every page. There is one page, so the layout wraps that page only.
+Next.js, in this repository, is a React framework with the App Router. A folder named `app` contains routes. `app/page.tsx` is the route `/`. `app/websites/page.tsx` is the route `/websites`. `app/layout.tsx` is the document wrapped around every page, including the header.
 
-A server component runs in the Node.js process while the response is being built. It can `await` a function. The result is HTML. This page has no `"use client"` directive. There is no component state, no `useEffect`, and no click handler. The only interactive element is a normal link.
+A server component runs in the Node.js process while the response is being built. It can `await` a function. The result is HTML. The status page has no `"use client"` directive. There is no component state, no `useEffect`, and no click handler on that page. The registry page is different: its form and list are client components, described in section 12.
 
 ### The files
 
 | File | What it contributes |
 | --- | --- |
-| `frontend/app/layout.tsx` | `<html lang="en">`, `<body>`, the page title `Sentinel`, the description, and `globals.css`. |
+| `frontend/app/layout.tsx` | `<html lang="en">`, `<body>`, the header, the page title `Sentinel`, the description, and `globals.css`. |
 | `frontend/app/page.tsx` | `HomePage`, `dynamic = "force-dynamic"`, and the status markup. |
-| `frontend/app/globals.css` | Colors, the card, and a one-column layout under 480px. Classes used by the page are `card`, `ok`, `bad`, and `hint`. |
-| `frontend/lib/api.ts` | The only module that calls the API. |
+| `frontend/app/globals.css` | Colors, the card, the registry form, and a one-column layout under 480px. |
+| `frontend/lib/api.ts` | Server-side health calls for the status page. |
 | `frontend/next.config.ts` | `reactStrictMode: true`, and `turbopack.root` set to the directory that contains the config file. |
 | `frontend/package.json` | Scripts `dev`, `build`, `start`, and `typecheck`. There is no `test` script. |
 | `frontend/tsconfig.json` | `strict: true`, `jsx: react-jsx`, and the `@/*` path. |
@@ -655,7 +669,7 @@ A type error fails that command. A down database does not. Typecheck never calls
 
 - Adding `"use client"` so you can `fetch` in the browser, and then wondering why the server snapshot stopped running. The current design depends on `HomePage` being a server component.
 - Removing `force-dynamic` and building the site while the API is down or stale. The frozen page would not be a live check.
-- Looking for a second route under `frontend/app`. `/docs` on the status page is a link to the API origin, not a Next.js route.
+- Looking for `/docs` under `frontend/app`. That link on the status page points at the API origin, not at a Next.js route. The Next.js routes are `/` and `/websites`.
 
 ## 10. Automated testing
 
@@ -821,8 +835,111 @@ When the page looks wrong, check in this order. Each step has one owner.
 
 - Installing project packages with the system `python` so that a bare `pytest` works. Keep those packages in `.venv`.
 - Starting a second Uvicorn because the first one failed for an unrelated reason. Port `8000` then belongs to a process you forgot. The log of the running process is the one that matters.
-- Assuming `localhost` in the browser, `127.0.0.1` in Uvicorn's `--host`, and `localhost` in `DATABASE_URL` are one string. Uvicorn bound to `127.0.0.1` still accepts connections to `localhost` when that name resolves to `127.0.0.1`. CORS does care about the spelling of the site origin. The default allowed origin is `http://localhost:3000`.
+- Assuming `localhost` in the browser, `127.0.0.1` in Uvicorn's `--host`, and `localhost` in `DATABASE_URL` are one string. Uvicorn bound to `127.0.0.1` still accepts connections to `localhost` when that name resolves to `127.0.0.1`. CORS does care about the spelling of the site origin. The default allowed origins are `http://localhost:3000` and `http://127.0.0.1:3000`. An existing root `.env` overrides that default.
 - Running `wsl --shutdown` to fix a Docker permission error. That stops the engine and the container. A new Ubuntu terminal is the smaller step after a group change.
+
+## 12. Website registry
+
+### The idea
+
+A registry is a list the program can remember after the process restarts. Milestone 2 stores that list in PostgreSQL. The row is a name, a base URL, and two timestamps. The id is a UUID so the URL can change later without the identity of the row changing. Nothing in this milestone opens that URL.
+
+This is one list for the whole development process. There is no user id on the row. Adding accounts later should add a real owner, not a fake one now.
+
+### Where it is implemented
+
+| File | Role |
+| --- | --- |
+| `backend/app/models/website.py` | SQLAlchemy model, unique `base_url`, and check constraints. |
+| `backend/app/core/urls.py` | `normalize_base_url()`. HTTP and HTTPS only. |
+| `backend/app/api/deps.py` | `get_session()`, which opens `app.state.session_factory`. |
+| `backend/app/api/routes/websites.py` | The four routes. |
+| `backend/alembic/versions/0001_create_websites.py` | The migration that creates the table. |
+| `backend/alembic/env.py` | Points Alembic at `DATABASE_URL` and runs it with asyncpg. |
+| `frontend/lib/websites.ts` | Types, form checks, and `fetch` calls. |
+| `frontend/components/WebsiteRegistry.tsx` | Loading, success, error, and delete confirmation. |
+| `frontend/app/websites/page.tsx` | The page shell. The interactive part is a client component. |
+
+`create_app()` includes the website router next to the health router. Startup is unchanged: the engine and session factory are created in the lifespan, and the pool still connects on first use.
+
+### The table
+
+`websites` has `id`, `name`, `base_url`, `created_at`, and `updated_at`. PostgreSQL generates the UUID if a raw insert omits it. The ORM also assigns `uuid4()` before insert, so the route knows the id. The timestamps come from `now()` in the database. After commit, the route refreshes the object so the JSON includes those timestamps. `expire_on_commit=False` would otherwise leave them missing, and an implicit refresh is not allowed in async code.
+
+The unique constraint is `uq_websites_base_url`. The checks are `ck_websites_base_url_http` and `ck_websites_name_not_blank`. Application validation runs first. The constraints are the backstop for any insert that does not go through the route.
+
+Apply the revision from `backend`:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+The API does not call Alembic when it starts. A missing table becomes HTTP `503` with the detail `The database schema is not ready. Apply migrations and try again.` The driver message stays in the log as an exception class name.
+
+### Normalization and HTTP status
+
+`WebsiteCreate` strips the name and rejects a blank name or a name longer than 120 characters. `normalize_base_url()` then requires `http` or `https`, a host, and no username, password, query, or fragment. It lowercases the scheme and host, removes a default port, and removes one trailing slash from the path. Invalid input is HTTP `422` from FastAPI, before a query runs.
+
+| Situation | Status | Body |
+| --- | --- | --- |
+| New website | `201` | The stored website, with the normalized URL |
+| Same normalized URL again | `409` | `A website with this base URL is already registered.` |
+| Unknown UUID | `404` | `Website not found.` |
+| Id is not a UUID | `422` | FastAPI's validation body |
+| Database connection failed | `503` | `The database is unavailable.` |
+| Table missing | `503` | The schema-not-ready sentence |
+
+`DELETE` returns `204` and an empty body. `GET /api/websites` returns a JSON array, newest `created_at` first.
+
+A unique violation is PostgreSQL sqlstate `23505`. The route treats that as `409`. Other integrity errors become `422` with a generic constraint sentence. None of these responses include `DATABASE_URL`.
+
+### Data flow for one added website
+
+```mermaid
+sequenceDiagram
+  participant Browser
+  participant Page as WebsiteRegistry
+  participant API as FastAPI
+  participant DB as PostgreSQL
+
+  Browser->>Page: submit the form
+  Page->>Page: validateWebsiteInput
+  Page->>API: POST /api/websites
+  API->>API: strip name and normalize_base_url
+  API->>DB: INSERT
+  DB-->>API: row and timestamps
+  API-->>Page: 201 JSON
+  Page-->>Browser: success text and the new row
+```
+
+The status page does not participate. Its server-side `fetch` is still the path in section 7. The registry request is cross-origin: the page is port `3000` and the API is port `8000`. `CORS_ORIGINS` has to name the page origin exactly. A direct browser call is why the default list includes both `localhost` and `127.0.0.1`.
+
+### What the page shows
+
+`WebsiteRegistry` loads the list on mount. While that request is in flight, the section says `Loading websites…`. A network or HTTP failure replaces the list with the error and a `Try again` button. An empty table says `No websites registered yet.`
+
+The form checks the name and URL before `fetch`. Server `422` and `409` responses are written next to the field that failed. A successful create clears the inputs and shows `{name} was added.`
+
+Delete first changes the row to `Delete {name}?` with `Delete` and `Cancel`. The `DELETE` request is sent only from the confirm button. On success the row disappears. A `404` also removes the row, because the server no longer has it.
+
+### A practical example
+
+With the migration applied and Uvicorn running:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/websites -Method Post -ContentType "application/json" -Body '{"name":"Example","base_url":"https://Example.com/docs/"}'
+```
+
+The returned `base_url` is `https://example.com/docs`. `GET /api/websites` includes that object. `DELETE /api/websites/{id}` returns no body.
+
+Then open `http://127.0.0.1:3000/websites`. Add a site, reject `ftp://example.com` in the form, and delete a row only after the confirmation appears. Refresh `/` and the status list should still render. The header links the two pages.
+
+### Mistakes
+
+- Forgetting `alembic upgrade head` and reading the website `503` as a broken route. `/health` can still be `200`. The detail sentence names the schema.
+- Sending the browser to port `8000` from an origin that is not in `CORS_ORIGINS`. The status page can look healthy because the Next.js server made those calls. The registry then fails in the browser.
+- Comparing `https://example.com` and `https://example.com/` as different sites. Normalization makes them one row, and the second insert is `409`.
+- Putting a user id on the model before accounts exist. The code would pretend a tenant boundary that this process does not enforce.
 
 ## Glossary
 
@@ -835,7 +952,9 @@ When the page looks wrong, check in this order. Each step has one owner.
 | Settings | The `Settings` class in `config.py`. One cached object per process. |
 | Env file | The root `.env`, found by walking three parents up from `config.py`. Git ignores it. |
 | Engine | The SQLAlchemy `AsyncEngine`, a pool of database connections. |
-| Session factory | `async_sessionmaker` created at startup. No route opens a session yet. |
+| Session factory | `async_sessionmaker` created at startup. Website routes open a session from it. |
+| Alembic revision | `0001_create_websites`. It creates the `websites` table. The API does not run it on startup. |
+| Normalized base URL | The stored form of a site address. Scheme and host are lowercased, and a trailing slash or default port is removed. |
 | asyncpg | The PostgreSQL driver selected by `postgresql+asyncpg://`. |
 | Pool pre-ping | A check SQLAlchemy runs before reusing a pooled connection. |
 | Liveness | `/health`. The process can answer. The database is not involved. |
@@ -864,7 +983,7 @@ Answer from the code and from a running stack. Each question names the file that
 3. A colleague changes `ENVIRONMENT` in `.env` and the next `/health` response still says `development`. What has to happen before the response changes, and why? (`backend/app/core/config.py`)
 4. `POSTGRES_PASSWORD` and the password inside `DATABASE_URL` differ. Which program reads which name, and what does `/health/ready` return? (`.env.example`, `backend/app/api/routes/health.py`)
 5. Why is `postgresql://sentinel:sentinel@localhost:5432/sentinel` rejected even though PostgreSQL would understand a URL of that shape? (`backend/app/core/config.py`, `backend/tests/test_config.py`)
-6. The session factory exists on `app.state`. Name a route that uses it. If you cannot find one, say what the startup test actually proves. (`backend/app/main.py`, `backend/tests/test_health.py`)
+6. Name a route that opens a session from `app.state.session_factory`. What does `test_startup_creates_engine_and_session_factory` prove without that route? (`backend/app/api/routes/websites.py`, `backend/tests/test_health.py`)
 7. `/health` returns `200` while `/health/ready` returns `503`. Is the API process down? What does each route refuse to do? (`backend/app/api/routes/health.py`)
 8. The readiness log says `Database readiness check failed (TimeoutError)` and the HTTP body does not contain the database URL. Where is that choice made? (`backend/app/core/database.py`)
 9. You refresh the status page and the browser's network panel shows one request, to port `3000`. How many requests does the Next.js server then make, and in what order? (`frontend/lib/api.ts`)
