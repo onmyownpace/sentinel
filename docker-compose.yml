@@ -1,4 +1,4 @@
-# Milestone 1 runs one service: PostgreSQL.
+# PostgreSQL is the only Compose service.
 # The API and the Next.js app run on the host so code reloads stay simple.
 # Redis, workers, and other services are intentionally absent.
 

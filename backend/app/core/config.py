@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # Next.js server. The website registry calls it from the browser, so the
     # origin of the page has to be listed. localhost and 127.0.0.1 differ.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # How long one navigation may take. The browser service adds a short
+    # allowance for launching Chromium, then stops the check.
+    check_navigation_timeout_seconds: float = 15
 
     @field_validator("database_url")
     @classmethod
@@ -46,6 +49,13 @@ class Settings(BaseSettings):
                 "DATABASE_URL must start with postgresql+asyncpg:// "
                 "so SQLAlchemy uses the async driver."
             )
+        return value
+
+    @field_validator("check_navigation_timeout_seconds")
+    @classmethod
+    def navigation_timeout_must_be_bounded(cls, value: float) -> float:
+        if value < 1 or value > 60:
+            raise ValueError("CHECK_NAVIGATION_TIMEOUT_SECONDS must be between 1 and 60")
         return value
 
     @property

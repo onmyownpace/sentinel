@@ -128,7 +128,15 @@ From `backend`, apply the schema and then start the API:
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-`alembic upgrade head` creates the `websites` table when it is missing. The API does not run migrations on startup. Without that table, website routes return `503` and tell you the schema is not ready. `/health` still returns `200`.
+`alembic upgrade head` creates `websites` and `website_checks` when they are missing. The API does not run migrations on startup. Without those tables, website and check routes return `503` and tell you the schema is not ready. `/health` still returns `200`.
+
+Install Chromium in this virtual environment before you run a check yourself. The Python package does not include the browser.
+
+```powershell
+.\.venv\Scripts\python.exe -m playwright install chromium
+```
+
+Pytest does not need that browser. A check you start from the registry page does.
 
 `--reload` restarts the process when a Python file changes. Settings are read at startup, so a change to `.env` is picked up on the next reload.
 
@@ -175,7 +183,27 @@ Restart `npm run dev` after changing that file. Next.js reads frontend env files
 
 The first `npm run dev` may adjust `frontend/tsconfig.json`. This Next.js version requires `jsx` set to `react-jsx` and adds its generated type folders to `include`. Those edits are already in the repository. `frontend/next.config.ts` sets `turbopack.root` to the frontend directory so the dev server does not walk upward and treat a `package-lock.json` in a parent folder as the project. Next.js also writes `frontend/AGENTS.md` when the dev server starts. That file is a note about this Next.js release for coding agents. Sentinel's own architecture stays in `docs/`.
 
-`NEXT_PUBLIC_` means the value is allowed to appear in browser code. The status page reads it on the server. The website registry reads it in the browser. The API address is not a secret.
+`NEXT_PUBLIC_` means the value is allowed to appear in browser code. The status page reads it on the server. The website registry and its check actions read it in the browser. The API address is not a secret.
+
+## Run a website check
+
+Chromium has to be installed in the backend virtual environment, and `alembic upgrade head` has to have applied `0002_create_website_checks`. The API and the website are both running.
+
+1. Open `http://127.0.0.1:3000/websites`.
+2. Register a site you are allowed to test. `http://127.0.0.1:3000` can be registered, and it is the right negative example: Run check returns an error and does not open it.
+3. On a public site you may test, choose Run check.
+4. Read the notice, tick "I am authorized to test this website", and choose Run check again.
+5. The button reads `Checking…` until the API returns. A default check can take about 15 seconds, plus a few seconds for Chromium to start. The page waits up to 40 seconds.
+6. The row shows Success or Failed, the HTTP status, the title, and the duration. Console errors and failed requests are listed when the result has them.
+7. Check history loads the stored rows. Deleting the website asks you to confirm, then deletes those rows too.
+
+The same request from PowerShell, after you copy a website id from the page or from `GET /api/websites`:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/websites/<website-id>/checks -Method Post -ContentType "application/json" -Body '{"authorized":true}'
+```
+
+`GET http://127.0.0.1:8000/api/websites/<website-id>/checks` returns the newest checks. Add `?limit=5` to take fewer than the default of 20.
 
 ## What happens when you refresh the page
 
@@ -284,10 +312,16 @@ A failed readiness check logs the exception class only, for example `TimeoutErro
 
 **Activate.ps1 cannot be loaded.** Call `.\.venv\Scripts\python.exe` as the examples do.
 
-**Pytest seems to hang for a few seconds near the end.** That is the integration test waiting on the two-second connect timeout. Let it finish and read whether the test passed or skipped.
+**The check says the browser runner is not available.** The Playwright package is installed, but Chromium is not. From `backend`, run `.\.venv\Scripts\python.exe -m playwright install chromium` and try the check again.
+
+**The check says the address is not a public HTTP or HTTPS site.** That is the address policy. Localhost, private networks, and cloud metadata addresses are refused before Chromium starts. Register a public site you are allowed to test.
+
+**Checking… ends with a timeout message.** The navigation exceeded `CHECK_NAVIGATION_TIMEOUT_SECONDS`, or the page stopped waiting at 40 seconds. The API may still store a failed row. Open Check history.
+
+**Pytest seems to hang for a few seconds near the end.** That is the integration test waiting on the two-second connect timeout. Let it finish and read whether the test passed or skipped. The check tests do not add a browser download or a public-site visit.
 
 ## What this environment is not
 
 It is not a production deploy. Reload, the default password, and a database published on `localhost` are for learning and local work.
 
-It is not the product. There is no account, no saved monitor, no browser run, and no call to an AI model. The next feature should add one of those and the storage it needs, rather than another empty service.
+It is not a monitoring service. A check runs once, when you ask, inside the API process. Nothing repeats it, and nothing calls an AI model. There is no account. The authorization checkbox records that you said you may test the site. It does not prove that you may.

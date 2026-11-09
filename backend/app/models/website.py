@@ -8,7 +8,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import CheckConstraint, DateTime, String, UniqueConstraint, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
 from app.models.base import Base
@@ -43,4 +43,10 @@ class Website(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+    # passive_deletes leaves the DELETE to PostgreSQL. The foreign key uses
+    # ON DELETE CASCADE, so the check rows go away with the website.
+    checks: Mapped[list["WebsiteCheck"]] = relationship(
+        back_populates="website",
+        passive_deletes=True,
     )
