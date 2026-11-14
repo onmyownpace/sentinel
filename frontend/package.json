@@ -2,7 +2,7 @@
   "name": "sentinel-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Web interface for Sentinel. Milestone 2 adds a website registry beside the status page.",
+  "description": "Web interface for Sentinel. The registry can run a bounded Playwright check.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

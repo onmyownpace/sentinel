@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.core.config import get_settings
 from app.models import Base
 from app.models.website import Website  # noqa: F401
+from app.models.website_check import WebsiteCheck  # noqa: F401
 
 config = context.config
 

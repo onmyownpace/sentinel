@@ -1,6 +1,6 @@
 # Technical walkthrough
 
-This document explains the code that is in the repository today. Sections 1 through 11 are the foundation: a FastAPI process, a Next.js status page, and one PostgreSQL container. Section 12 is the website registry built on that foundation.
+This document explains the code that is in the repository today. Sections 1 through 11 are the foundation: a FastAPI process, a Next.js status page, and one PostgreSQL container. Section 12 is the website registry built on that foundation. Section 13 is the browser check that runs against a registered site.
 
 Read it next to the files it names. When a section says a function does something, that function is the place to confirm it.
 
@@ -10,10 +10,11 @@ What this checkout actually does:
 - `GET /health/ready` runs `SELECT 1` and reports whether PostgreSQL answered.
 - The page at `/` asks the Next.js server to call those two routes and render the result.
 - `POST`, `GET`, and `DELETE` under `/api/websites` store one shared list of sites.
-- The page at `/websites` calls those routes from the browser.
-- Pytest checks both contracts. One test runs `SELECT 1` against the database in `DATABASE_URL`. The registry tests apply the Alembic revision and then delete the rows they insert.
+- `POST /api/websites/{website_id}/checks` opens that site in Chromium and stores the result. Two `GET` routes read the history.
+- The page at `/websites` calls those routes from the browser. A check starts only after an authorization acknowledgement.
+- Pytest checks these contracts. One test runs `SELECT 1` against the database in `DATABASE_URL`. The registry and check tests apply the Alembic revisions and then delete the rows they insert. Check tests do not visit public websites.
 
-There is no saved monitor, user account, browser runner, or call to an external AI service in this code. Websites are remembered. Nobody owns them yet. If you cannot find a feature in the files below, it is not implemented.
+There is no saved monitor, user account, schedule, or call to an external AI service in this code. Websites are remembered, and a person who can call the API can run a check. Nobody owns a row yet. If you cannot find a feature in the files below, it is not implemented.
 
 Setup commands for this machine live in [the development-environment guide](development-environment.md). This walkthrough explains why those commands work.
 
@@ -842,7 +843,7 @@ When the page looks wrong, check in this order. Each step has one owner.
 
 ### The idea
 
-A registry is a list the program can remember after the process restarts. Milestone 2 stores that list in PostgreSQL. The row is a name, a base URL, and two timestamps. The id is a UUID so the URL can change later without the identity of the row changing. Nothing in this milestone opens that URL.
+A registry is a list the program can remember after the process restarts. Milestone 2 stores that list in PostgreSQL. The row is a name, a base URL, and two timestamps. The id is a UUID so the URL can change later without the identity of the row changing. Opening that URL is a separate step, covered in section 13. The registry itself only stores the address.
 
 This is one list for the whole development process. There is no user id on the row. Adding accounts later should add a real owner, not a fake one now.
 
@@ -941,6 +942,93 @@ Then open `http://127.0.0.1:3000/websites`. Add a site, reject `ftp://example.co
 - Comparing `https://example.com` and `https://example.com/` as different sites. Normalization makes them one row, and the second insert is `409`.
 - Putting a user id on the model before accounts exist. The code would pretend a tenant boundary that this process does not enforce.
 
+## 13. Browser checks
+
+### The idea
+
+A check opens one registered website in Chromium and writes down what the browser saw. The API waits for that work. There is no queue and no schedule. The browser code lives in `PlaywrightCheckService` so a later milestone can move the same object into a worker.
+
+`success` means the main document responded with an HTTP status from 200 through 399. `failed` means a `4xx` or `5xx`, a timeout, a navigation error, or a target the policy refused after the browser had started. A refused target that never starts the browser is HTTP `422` and is not stored. A finished failure is stored, so the history shows what went wrong.
+
+### Where it is implemented
+
+| File | Role |
+| --- | --- |
+| `backend/app/services/network.py` | `ensure_public_http_url()` and `classify_browser_url()`. |
+| `backend/app/services/browser.py` | `PlaywrightCheckService`. Launch, navigate, collect, close. |
+| `backend/app/services/results.py` | `CheckObservation` and the sanitizer that runs before a row is stored. |
+| `backend/app/models/website_check.py` | The `website_checks` table. |
+| `backend/alembic/versions/0002_create_website_checks.py` | The migration. `down_revision` is `0001_create_websites`. |
+| `backend/app/api/routes/checks.py` | The three routes. |
+| `frontend/lib/checks.ts` | Types and `fetch` calls. The request waits up to 40 seconds. |
+| `frontend/components/WebsiteChecks.tsx` | Acknowledgement, loading state, and history. |
+| `frontend/components/CheckResult.tsx` | One result: outcome, status, title, duration, errors. |
+
+`create_app()` includes the check router next to the website router. Startup does not launch Chromium. The browser starts when a check is requested, and it is closed before the response is sent.
+
+### The table
+
+`website_checks` has `id`, `website_id`, `outcome`, `http_status`, `page_title`, `final_url`, `duration_ms`, `console_errors`, `failed_requests`, `error_message`, and `created_at`. Console errors and failed requests are JSONB arrays. The lists are capped at 10 items. Text fields are capped in the sanitizer, and the columns match those caps.
+
+`fk_website_checks_website_id` points at `websites.id` with `ON DELETE CASCADE`. Deleting a website deletes its checks. `Website.checks` uses `passive_deletes=True`, so SQLAlchemy does not load the children and does not try to null the foreign key. PostgreSQL removes the rows.
+
+The index `ix_website_checks_website_id_created_at` supports the history query: one website, newest `created_at` first.
+
+### What one check does
+
+1. The route requires `{"authorized": true}`. Anything else is `422` before a query.
+2. It loads the website, or returns `404`.
+3. `ensure_public_http_url()` accepts only `http` and `https`. It rejects userinfo, `localhost`, names ending in `.local`, `.localhost`, `.internal`, or `.localdomain`, metadata hostnames, digit-only hosts, and `0x` labels. Literal addresses must be public unicast. Hostnames are resolved, and every address must pass the same test. A private answer, including a mix of public and private answers, is `422`.
+4. `PlaywrightCheckService` launches headless Chromium. The navigation timeout comes from `CHECK_NAVIGATION_TIMEOUT_SECONDS` (default 15, allowed range 1 to 60). The whole `run()` call is also limited to that timeout plus 10 seconds, so a stuck launch cannot run forever.
+5. Every browser request goes through `page.route`. `data:` and `blob:` URLs are left alone so a page can render. Any other non-public URL is aborted. A blocked navigation fails the check. A blocked subrequest is recorded as a failed request and is not sent.
+6. The service records the main response status, the final URL, the document title, `console.error` messages, and requests that failed. It does not read headers, cookies, or bodies.
+7. `sanitize_observation()` drops userinfo, query strings, and fragments from stored URLs, truncates text, and replaces common secret shapes. A final URL that is not public is discarded and the outcome becomes `failed`.
+8. The row is inserted and returned as `201`.
+
+A missing Playwright package or a missing Chromium binary becomes a stored failure whose message is `The browser runner is not available.` The exception text stays in the log as a class name.
+
+### HTTP status
+
+| Situation | Status | What is stored |
+| --- | --- | --- |
+| Navigation finished | `201` | The row, whether the outcome is `success` or `failed` |
+| `authorized` is not `true` | `422` | Nothing |
+| Address is not public, or the host does not resolve | `422` | Nothing |
+| Unknown website or unknown check | `404` | Nothing |
+| Id is not a UUID, or `limit` is outside 1–50 | `422` | Nothing |
+| Database is down or the table is missing | `503` | Nothing |
+
+`GET /api/websites/{website_id}/checks` returns a JSON array. `GET /api/checks/{check_id}` returns one object.
+
+### A practical example
+
+Install Chromium once, from `backend`, after `pip install`:
+
+```powershell
+.\.venv\Scripts\python.exe -m playwright install chromium
+```
+
+Apply both revisions with `alembic upgrade head`. Register a site you are allowed to test. Then:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/websites/<website-id>/checks -Method Post -ContentType "application/json" -Body '{"authorized":true}'
+```
+
+The body includes `outcome`, `http_status`, `page_title`, `duration_ms`, `console_errors`, and `failed_requests`. On the registry page, Run check shows the acknowledgement first. The button reads `Checking…` until the API answers. Check history loads the same rows.
+
+A registered `http://127.0.0.1/...` URL is a useful negative demo. The API returns `422` and the runner is not called.
+
+### Limits
+
+Sentinel resolves a host, then Chromium connects by itself. A DNS change between those two steps can still steer a connection at an internal address. The check also caches the first decision for each host, which lengthens that window for later requests. WebSockets may not pass through `page.route`. The console filter is a pattern list, not a proof that the page did not print a secret. The acknowledgement is not authentication.
+
+### Mistakes
+
+- Forgetting `python -m playwright install chromium` and reading `The browser runner is not available.` as a database failure. `/health/ready` can still be `200`.
+- Treating a stored `failed` row as an HTTP `500`. The check finished. The page did not.
+- Pointing a check at a site you do not have permission to test. The checkbox does not grant that permission.
+- Expecting the tests to open a public website. They inject `app.state.check_runner`. A test that calls the real service against the internet is a different kind of test, and this suite does not do it.
+
 ## Glossary
 
 | Term | Meaning in this repository |
@@ -953,8 +1041,10 @@ Then open `http://127.0.0.1:3000/websites`. Add a site, reject `ftp://example.co
 | Env file | The root `.env`, found by walking three parents up from `config.py`. Git ignores it. |
 | Engine | The SQLAlchemy `AsyncEngine`, a pool of database connections. |
 | Session factory | `async_sessionmaker` created at startup. Website routes open a session from it. |
-| Alembic revision | `0001_create_websites`. It creates the `websites` table. The API does not run it on startup. |
+| Alembic revision | `0001_create_websites`, then `0002_create_website_checks`. The API does not run them on startup. |
 | Normalized base URL | The stored form of a site address. Scheme and host are lowercased, and a trailing slash or default port is removed. |
+| Check outcome | `success` when the main document status is 200–399. `failed` for an HTTP error, a timeout, or a navigation error. |
+| Public address | An HTTP or HTTPS target whose resolved addresses are global unicast. Loopback, private, link-local, reserved, and metadata names are refused. |
 | asyncpg | The PostgreSQL driver selected by `postgresql+asyncpg://`. |
 | Pool pre-ping | A check SQLAlchemy runs before reusing a pooled connection. |
 | Liveness | `/health`. The process can answer. The database is not involved. |
@@ -996,3 +1086,6 @@ Answer from the code and from a running stack. Each question names the file that
 16. `docker compose ps` works in a new Ubuntu terminal and fails with `permission denied` on `/var/run/docker.sock` in an older one. The container is healthy the whole time. What is different about the two shells? ([development-environment.md](development-environment.md))
 17. PowerShell says `No module named pytest`. The file `backend\.venv\Scripts\python.exe` runs the suite. Which interpreter did the failing command use, and what is the command that uses the right one? (`backend/pyproject.toml`)
 18. The status page link "Open the API documentation" goes to port `8000`, not to a page under `frontend/app`. What URL does the component build, and which server renders Swagger UI? (`frontend/app/page.tsx`, `backend/app/main.py`)
+19. A website was registered as `http://127.0.0.1:3000`. Why does `POST /api/websites/{id}/checks` return `422` without launching Chromium? Which function applies that rule, and which function allowed the URL to be stored? (`backend/app/services/network.py`, `backend/app/core/urls.py`)
+20. The check runner raises `RuntimeError` with a database URL in the message. What does the HTTP body contain, and what does the log record? (`backend/app/api/routes/checks.py`, `backend/app/services/results.py`)
+21. You delete a website that has three checks. How many SQL statements does the route emit for the children, and which database rule removes them? (`backend/app/models/website.py`, `backend/alembic/versions/0002_create_website_checks.py`)

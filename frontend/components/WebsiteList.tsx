@@ -1,6 +1,7 @@
 "use client";
 
 import type { Website } from "@/lib/websites";
+import { WebsiteChecks } from "@/components/WebsiteChecks";
 
 type WebsiteListProps = {
   websites: Website[];
@@ -41,7 +42,7 @@ export function WebsiteList({
             </div>
             {confirming ? (
               <div className="confirm" role="group" aria-label={`Confirm deletion of ${website.name}`}>
-                <p className="hint tight">Delete {website.name}?</p>
+                <p className="hint tight">Delete {website.name} and its check history?</p>
                 <div className="actions">
                   <button
                     className="danger"
@@ -61,6 +62,7 @@ export function WebsiteList({
                 Delete
               </button>
             )}
+            <WebsiteChecks websiteId={website.id} disabled={confirming || deleting} />
           </li>
         );
       })}

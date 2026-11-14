@@ -273,3 +273,46 @@ input:focus-visible {
     justify-items: start;
   }
 }
+
+.check-panel {
+  grid-column: 1 / -1;
+}
+
+.check-panel .actions {
+  margin: 0.2rem 0 0;
+}
+
+.acknowledge {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+  margin-top: 0.45rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.check-result {
+  display: grid;
+  gap: 0.15rem;
+  margin-top: 0.55rem;
+}
+
+.check-result ul,
+.check-history-list {
+  margin: 0.15rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.check-history {
+  margin-top: 0.35rem;
+}
+
+.check-history-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.check-history-list > li {
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--line);
+}

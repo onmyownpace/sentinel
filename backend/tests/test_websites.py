@@ -14,23 +14,6 @@ from app.core.config import get_settings
 from app.main import create_app
 
 
-@pytest.fixture(scope="session")
-def migrated_database() -> None:
-    from pathlib import Path
-
-    from alembic import command
-    from alembic.config import Config
-
-    backend_root = Path(__file__).resolve().parents[1]
-    config = Config(str(backend_root / "alembic.ini"))
-    command.upgrade(config, "head")
-
-
-@pytest.fixture
-def registry_client(migrated_database: None, client: TestClient) -> TestClient:
-    return client
-
-
 def test_rejects_a_non_http_url(client: TestClient) -> None:
     response = client.post(
         "/api/websites",

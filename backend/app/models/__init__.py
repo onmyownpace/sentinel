@@ -2,5 +2,6 @@
 
 from app.models.base import Base
 from app.models.website import Website
+from app.models.website_check import WebsiteCheck
 
-__all__ = ["Base", "Website"]
+__all__ = ["Base", "Website", "WebsiteCheck"]

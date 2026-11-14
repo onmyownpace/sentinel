@@ -2,7 +2,7 @@
 
 Sentinel is the start of a website testing and monitoring platform. A person will eventually describe a site to watch, the platform will open that site in a browser, and later steps will interpret the result and notify other tools.
 
-Milestone 1 proved three things: the API can answer HTTP, it can open PostgreSQL, and the web app can render that report. Milestone 2 stores websites on that foundation. It still does not open a browser, interpret a failure, or notify another tool. There is one shared registry and no user accounts.
+Milestone 1 proved three things: the API can answer HTTP, it can open PostgreSQL, and the web app can render that report. Milestone 2 stores websites on that foundation. Milestone 3 opens one registered site in Chromium and stores the result. It still does not interpret a failure with a model, schedule a check, or notify another tool. There is one shared registry and no user accounts.
 
 ## How to read the repository
 
@@ -27,11 +27,17 @@ Sentinel/
 │   │   ├── main.py
 │   │   ├── api/routes/health.py
 │   │   ├── api/routes/websites.py
+│   │   ├── api/routes/checks.py
 │   │   ├── core/
 │   │   │   ├── config.py
 │   │   │   ├── database.py
 │   │   │   └── urls.py
-│   │   └── models/website.py
+│   │   ├── models/website.py
+│   │   ├── models/website_check.py
+│   │   └── services/
+│   │       ├── network.py
+│   │       ├── browser.py
+│   │       └── results.py
 │   └── tests/
 └── frontend/
     ├── package.json
@@ -49,7 +55,8 @@ Sentinel/
     ├── components/
     └── lib/
         ├── api.ts
-        └── websites.ts
+        ├── websites.ts
+        └── checks.ts
 ```
 
 | Path | Purpose |
@@ -61,13 +68,19 @@ Sentinel/
 | `backend/app/core/database.py` | Creates the async engine and session factory, and runs the connectivity query. |
 | `backend/app/api/routes/health.py` | Liveness and readiness routes. |
 | `backend/app/api/routes/websites.py` | Create, list, read, and delete registered websites. |
+| `backend/app/api/routes/checks.py` | Run one check and read its history. |
 | `backend/app/models/website.py` | The `websites` table. |
-| `backend/alembic/` | Schema revisions. `0001_create_websites` creates that table. |
-| `backend/tests/` | Automated checks for configuration, health, URL rules, and the registry. |
+| `backend/app/models/website_check.py` | The `website_checks` table. Deleting a website deletes these rows. |
+| `backend/app/services/network.py` | Rejects targets that are not public HTTP or HTTPS. |
+| `backend/app/services/browser.py` | Launches Chromium, collects the result, and always closes it. |
+| `backend/app/services/results.py` | Removes credential-shaped text before a result is stored. |
+| `backend/alembic/` | Schema revisions. `0001_create_websites` creates the registry. `0002_create_website_checks` creates check history. |
+| `backend/tests/` | Automated checks for configuration, health, URL rules, the registry, the address policy, and check persistence. |
 | `frontend/app/page.tsx` | The status page. |
 | `frontend/app/websites/page.tsx` | The website registry page. |
 | `frontend/lib/api.ts` | Server-side fetch of `/health` and `/health/ready`. |
 | `frontend/lib/websites.ts` | Browser calls to `/api/websites`, plus the form's input checks. |
+| `frontend/lib/checks.ts` | Browser calls that run a check and load its history. |
 | `docs/` | Explanations that should stay accurate as the code changes. |
 
 `backend/.venv/` and `frontend/node_modules/` are created on your machine. They are not part of the design, and git ignores them.
@@ -81,37 +94,40 @@ flowchart TB
   browser[Browser]
   web["Next.js on port 3000"]
   api["FastAPI on port 8000"]
+  chromium["Chromium via Playwright"]
   db["PostgreSQL on port 5432"]
 
   browser -->|"GET /"| web
   web -->|"GET /health and GET /health/ready"| api
-  api -->|"SELECT 1 through asyncpg"| db
+  browser -->|"website and check routes"| api
+  api -->|"SELECT 1, websites, and website_checks"| db
+  api -->|"one bounded navigation"| chromium
 ```
 
-The next diagram is a boundary, not a running system. Dotted arrows are seams we are leaving open. No code on those arrows exists yet.
+The next diagram is a boundary, not a second running system. Dotted arrows are seams we are leaving open. No code on those arrows exists yet.
 
 ```mermaid
 flowchart LR
-  subgraph milestone [Milestone 1]
+  subgraph milestone [Running now]
     web[Next.js]
     api[FastAPI]
+    chromium[Playwright Chromium]
     db[(PostgreSQL)]
   end
 
   subgraph later [Not built]
-    playwright[Playwright]
     openai[OpenAI]
     n8n[n8n]
   end
 
   web --> api
   api --> db
-  api -.-> playwright
+  api --> chromium
   api -.-> openai
   n8n -.-> api
 ```
 
-Playwright will drive a browser against a site under test. The OpenAI API will be used later to interpret results. n8n will sit outside this repository and call the API when a workflow needs Sentinel. None of those choices require Redis or a task queue yet, so neither is introduced. A queue is a later decision, made when a concrete job needs to leave the request process.
+Playwright drives Chromium against a site the caller says they may test. The OpenAI API will be used later to interpret results. n8n will sit outside this repository and call the API when a workflow needs Sentinel. The check stays inside the API request. A queue is a later decision, made when a check needs to leave that request.
 
 ## Request flow
 
@@ -217,7 +233,7 @@ The env-file path is computed from the location of `config.py`, not from the she
 
 ### Website registry
 
-`Website` in `backend/app/models/website.py` is the only mapped table. The columns are `id` (UUID primary key), `name` (up to 120 characters), `base_url` (up to 2048 characters), `created_at`, and `updated_at`. `base_url` is unique. Database checks require a non-blank name and a base URL that starts with `http://` or `https://`.
+`Website` in `backend/app/models/website.py` is one of two mapped tables. The columns are `id` (UUID primary key), `name` (up to 120 characters), `base_url` (up to 2048 characters), `created_at`, and `updated_at`. `base_url` is unique. Database checks require a non-blank name and a base URL that starts with `http://` or `https://`.
 
 `normalize_base_url()` in `backend/app/core/urls.py` is the application rule behind that column. It accepts only HTTP and HTTPS, rejects userinfo, queries, and fragments, lowercases the scheme and host, and drops a trailing slash and a default port. `https://Example.com:443/docs/` and `https://example.com/docs` are one site.
 
@@ -245,7 +261,53 @@ sequenceDiagram
   end
 ```
 
-The page at `/websites` is a client component. It checks the form before sending, then calls the API with `fetch`. Loading, success, and error text are separate. Delete asks for confirmation in the row before it sends `DELETE`.
+The page at `/websites` is a client component. It checks the form before sending, then calls the API with `fetch`. Loading, success, and error text are separate. Delete asks for confirmation in the row before it sends `DELETE`, and the confirmation says that check history will be deleted too.
+
+### Website checks
+
+`WebsiteCheck` stores one run: outcome (`success` or `failed`), HTTP status, page title, final URL, duration in milliseconds, console errors, failed-request summaries, a sanitized error message, and `created_at`. The foreign key uses `ON DELETE CASCADE`. `Website.checks` sets `passive_deletes`, so SQLAlchemy emits one `DELETE` for the website and PostgreSQL removes the history.
+
+Registration and checking use different rules. `normalize_base_url()` accepts any HTTP or HTTPS host, including `localhost`, because the registry is a list. `ensure_public_http_url()` runs before Chromium starts. It allows only HTTP and HTTPS, rejects userinfo, and rejects a host that is local, private, loopback, link-local, reserved, multicast, or a known metadata name. Hostnames are resolved. If any returned address fails that test, the check is refused with `422`.
+
+`PlaywrightCheckService.run()` then launches headless Chromium, routes every request through the same rule, and measures the navigation. A main-document status from 200 through 399 is `success`. A `4xx` or `5xx`, a timeout, or a navigation error is `failed`, and the row is still saved. The navigation timeout defaults to 15 seconds and must stay between 1 and 60. The service adds 10 seconds for the browser to start, then cancels the check. `page`, the browser context, the browser, and the Playwright driver are closed in a `finally` block.
+
+The route waits for that result. Tests replace `app.state.check_runner` and, when they need DNS, `app.state.host_resolver`. The real service is built only when those are absent. Automated tests therefore do not visit public websites.
+
+Stored text is passed through `sanitize_observation()`. URLs keep scheme, host, port, and path. Userinfo, queries, and fragments are dropped. Console lines and error text are truncated, and common `Authorization`, `Cookie`, `Bearer`, and userinfo-URL shapes are replaced. The response does not include request headers, cookies, or exception text.
+
+These protections are not complete:
+
+- Chromium connects after Sentinel's DNS lookup. A rebinding in that gap is not fully closed, and the per-check host cache makes the gap longer for later requests to the same host.
+- WebSockets and some browser-internal requests may not pass through `page.route`.
+- Odd address spellings that Python does not parse as an IP can still be treated as hostnames. Digit-only hosts and `0x` labels are rejected. Other encodings may remain.
+- The page itself can print a secret in a shape the filter does not recognize.
+- `authorized: true` is an acknowledgement. This process has no accounts, so it cannot prove ownership.
+
+`POST /api/websites/{website_id}/checks` returns `201` with the stored row, including a failed navigation. `GET /api/websites/{website_id}/checks` returns the newest rows, default 20, maximum 50. `GET /api/checks/{check_id}` returns one row or `404`. An unknown website is `404`. An id that is not a UUID is `422`. A missing table is the same schema `503` as the registry.
+
+```mermaid
+sequenceDiagram
+  participant Browser
+  participant API as FastAPI
+  participant Policy as Address policy
+  participant Chromium
+  participant DB as PostgreSQL
+
+  Browser->>API: POST /checks with authorized true
+  API->>DB: load the website
+  API->>Policy: is the base URL public?
+  alt address is not public
+    API-->>Browser: 422 and no browser
+  else address is public
+    API->>Chromium: open the page, bounded timeout
+    Chromium-->>API: status, title, final URL, errors
+    API->>API: drop secrets and private final URLs
+    API->>DB: INSERT website_checks
+    API-->>Browser: 201 JSON
+  end
+```
+
+The registry page asks for the acknowledgement before it sends that request. While the request is in flight the button reads `Checking…`. The result panel shows outcome, status, title, and duration. Console errors and failed requests render only when the row contains them. Check history is a second request, loaded when the row asks for it.
 
 ### Health routes
 
@@ -281,6 +343,9 @@ Tests are part of the foundation, not a later cleanup.
 - `test_database.py` is marked `integration`. It runs `SELECT 1` against `DATABASE_URL`. If the driver cannot connect, the test skips and prints the exception type. That skip must not be reported as a passing database check.
 - `test_urls.py` locks URL normalization and rejection without a database.
 - `test_websites.py` applies the Alembic revision, then checks create, list, read, delete, duplicate URLs, missing rows, and a closed-port failure that must not echo the password. Persistence tests delete only the rows they insert.
+- `test_network.py` locks the public-address rule. The resolver is a function the test supplies, so the suite does not call DNS.
+- `test_check_service.py` locks the navigation budget, secret redaction, and the timeout setting. It does not launch Chromium.
+- `test_checks.py` stores scripted results, refuses private targets without calling the runner, and checks that deleting a website deletes the history.
 
 ## Design decisions
 
@@ -292,9 +357,9 @@ Tests are part of the foundation, not a later cleanup.
 
 **Host processes for the API and the web, Docker only for PostgreSQL.** Edit-and-reload is simpler when Uvicorn and Next.js are local processes. PostgreSQL is the stateful piece, so it is the piece Compose owns. Adding more containers before they earn their keep makes logs and networking harder to teach.
 
-**No Redis and no Celery.** Saved websites live in PostgreSQL. A queue would still be an empty service. Background work can be reconsidered when a check needs to run outside the web request.
+**No Redis and no Celery.** Saved websites and check results live in PostgreSQL. The API waits for one bounded check. A queue would still be an extra service. Background work can be reconsidered when a check needs to run outside the web request.
 
-**Fail closed, and stay quiet about why.** Readiness returns `unavailable` for every connection failure: refused, timed out, wrong password, missing database. Website routes return `503` for those failures and do not include the driver text. Callers do not need the driver taxonomy. Operators can look at the API log, which records the exception class name and not the message.
+**Fail closed, and stay quiet about why.** Readiness returns `unavailable` for every connection failure: refused, timed out, wrong password, missing database. Website and check routes return `503` for those failures and do not include the driver text. A browser failure becomes a stored `failed` result with a fixed sentence. Callers do not need the driver or Playwright taxonomy. Operators can look at the API log, which records the exception class name and not the message.
 
 **One shared registry.** Milestone 2 does not invent users to own each row. Authentication can be added when there is a real account model, instead of a placeholder user on every website.
 
@@ -316,6 +381,9 @@ Declared directly, because each one is a choice. Versions below are the ones `pi
 | `asyncpg` | 0.32.0 | PostgreSQL driver used by the async engine and by Alembic. |
 | `pydantic-settings` | 2.16.2 | Reads environment variables and `.env` into a typed `Settings` object. |
 | `alembic` | 1.20.1 | Schema revisions. It also installs Mako, which renders revision templates. |
+| `playwright` | 1.64.1 | Python async API that launches Chromium. The browser binary is installed separately with `python -m playwright install chromium`. |
+
+Playwright also installs `pyee` 14.0.0, which delivers browser events to the check service. The Chromium binary is not a pip package.
 
 FastAPI also installed Starlette 1.10.0, Pydantic 2.14.3, and `python-dotenv` 1.2.4. Those are libraries our direct dependencies need. Application code imports FastAPI, Pydantic models, and `pydantic-settings`, not Starlette itself. OpenTelemetry's API package is pulled in by this FastAPI release. Sentinel does not configure tracing. It is not a product dependency.
 
@@ -341,7 +409,7 @@ FastAPI also installed Starlette 1.10.0, Pydantic 2.14.3, and `python-dotenv` 1.
 
 ### Not installed
 
-Playwright, the OpenAI SDK, an n8n deployment, Redis, and Celery. Alembic is installed because the `websites` table needs a revision.
+The OpenAI SDK, an n8n deployment, Redis, and Celery. Alembic is installed because `websites` and `website_checks` need revisions. Chromium is installed with Playwright's own command, not with pip.
 
 ## Version identity
 
