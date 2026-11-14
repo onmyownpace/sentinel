@@ -1,6 +1,6 @@
 # Technical walkthrough
 
-This document explains the code that is in the repository today. Sections 1 through 11 are the foundation: a FastAPI process, a Next.js status page, and one PostgreSQL container. Section 12 is the website registry built on that foundation. Section 13 is the browser check that runs against a registered site.
+This document explains the code that is in the repository today. Sections 1 through 11 are the foundation: a FastAPI process, a Next.js status page, and one PostgreSQL container. Section 12 is the website registry built on that foundation. Section 13 is the browser check that runs against a registered site. The n8n follow-up that reads those checks is a separate note, [n8n follow-up](n8n-follow-up.md), because n8n is another process rather than another Python module.
 
 Read it next to the files it names. When a section says a function does something, that function is the place to confirm it.
 
@@ -12,7 +12,8 @@ What this checkout actually does:
 - `POST`, `GET`, and `DELETE` under `/api/websites` store one shared list of sites.
 - `POST /api/websites/{website_id}/checks` opens that site in Chromium and stores the result. Two `GET` routes read the history.
 - The page at `/websites` calls those routes from the browser. A check starts only after an authorization acknowledgement.
-- Pytest checks these contracts. One test runs `SELECT 1` against the database in `DATABASE_URL`. The registry and check tests apply the Alembic revisions and then delete the rows they insert. Check tests do not visit public websites.
+- Pytest checks these contracts. One test runs `SELECT 1` against the database in `DATABASE_URL`. The registry and check tests apply the Alembic revisions and then delete the rows they insert. Check tests do not visit public websites. The n8n test only reads the workflow file.
+- n8n can draft a follow-up from a stored failed check. It does not send that draft, and it does not start a browser.
 
 There is no saved monitor, user account, schedule, or call to an external AI service in this code. Websites are remembered, and a person who can call the API can run a check. Nobody owns a row yet. If you cannot find a feature in the files below, it is not implemented.
 
@@ -1029,6 +1030,8 @@ Sentinel resolves a host, then Chromium connects by itself. A DNS change between
 - Pointing a check at a site you do not have permission to test. The checkbox does not grant that permission.
 - Expecting the tests to open a public website. They inject `app.state.check_runner`. A test that calls the real service against the internet is a different kind of test, and this suite does not do it.
 
+The n8n workflow that reads a finished check is documented in [n8n follow-up](n8n-follow-up.md). It is not part of the API process.
+
 ## Glossary
 
 | Term | Meaning in this repository |
@@ -1045,6 +1048,7 @@ Sentinel resolves a host, then Chromium connects by itself. A DNS change between
 | Normalized base URL | The stored form of a site address. Scheme and host are lowercased, and a trailing slash or default port is removed. |
 | Check outcome | `success` when the main document status is 200–399. `failed` for an HTTP error, a timeout, or a navigation error. |
 | Public address | An HTTP or HTTPS target whose resolved addresses are global unicast. Loopback, private, link-local, reserved, and metadata names are refused. |
+| n8n workflow | `n8n/workflows/failed-check-follow-up.json`. A manual run that reads stored checks and drafts a follow-up. |
 | asyncpg | The PostgreSQL driver selected by `postgresql+asyncpg://`. |
 | Pool pre-ping | A check SQLAlchemy runs before reusing a pooled connection. |
 | Liveness | `/health`. The process can answer. The database is not involved. |
@@ -1089,3 +1093,4 @@ Answer from the code and from a running stack. Each question names the file that
 19. A website was registered as `http://127.0.0.1:3000`. Why does `POST /api/websites/{id}/checks` return `422` without launching Chromium? Which function applies that rule, and which function allowed the URL to be stored? (`backend/app/services/network.py`, `backend/app/core/urls.py`)
 20. The check runner raises `RuntimeError` with a database URL in the message. What does the HTTP body contain, and what does the log record? (`backend/app/api/routes/checks.py`, `backend/app/services/results.py`)
 21. You delete a website that has three checks. How many SQL statements does the route emit for the children, and which database rule removes them? (`backend/app/models/website.py`, `backend/alembic/versions/0002_create_website_checks.py`)
+22. The n8n workflow lists websites and their newest check. Why is there no `POST` in that file, and which node would you replace when a message should actually be sent? ([n8n-follow-up.md](n8n-follow-up.md))

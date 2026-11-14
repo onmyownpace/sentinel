@@ -2,7 +2,7 @@
 
 Sentinel is the start of a website testing and monitoring platform. A person will eventually describe a site to watch, the platform will open that site in a browser, and later steps will interpret the result and notify other tools.
 
-Milestone 1 proved three things: the API can answer HTTP, it can open PostgreSQL, and the web app can render that report. Milestone 2 stores websites on that foundation. Milestone 3 opens one registered site in Chromium and stores the result. It still does not interpret a failure with a model, schedule a check, or notify another tool. There is one shared registry and no user accounts.
+Milestone 1 proved three things: the API can answer HTTP, it can open PostgreSQL, and the web app can render that report. Milestone 2 stores websites on that foundation. Milestone 3 opens one registered site in Chromium and stores the result. n8n reads those stored results and drafts a follow-up. It still does not interpret a failure with a model, send the draft, schedule a check, or notify another tool. There is one shared registry and no user accounts.
 
 ## How to read the repository
 
@@ -18,7 +18,10 @@ Sentinel/
 ├── docker-compose.yml
 ├── docs/
 │   ├── architecture/overview.md
-│   └── learning/development-environment.md
+│   └── learning/
+│       ├── development-environment.md
+│       ├── milestone-1-technical-walkthrough.md
+│       └── n8n-follow-up.md
 ├── backend/
 │   ├── pyproject.toml
 │   ├── alembic.ini
@@ -39,6 +42,8 @@ Sentinel/
 │   │       ├── browser.py
 │   │       └── results.py
 │   └── tests/
+├── n8n/
+│   └── workflows/failed-check-follow-up.json
 └── frontend/
     ├── package.json
     ├── package-lock.json
@@ -61,8 +66,8 @@ Sentinel/
 
 | Path | Purpose |
 | --- | --- |
-| `docker-compose.yml` | Starts PostgreSQL and nothing else. |
-| `.env.example` | Documents the local database account and the API settings. Copy it to `.env` to override defaults. |
+| `docker-compose.yml` | Starts PostgreSQL and n8n. The API and the website stay on the host. |
+| `.env.example` | Documents the local database account, the API settings, and the n8n port. Copy it to `.env` to override defaults. |
 | `backend/app/main.py` | Builds the FastAPI application, CORS, logging, and the database lifecycle. |
 | `backend/app/core/config.py` | Loads settings from the environment and the root `.env` file. |
 | `backend/app/core/database.py` | Creates the async engine and session factory, and runs the connectivity query. |
@@ -75,7 +80,8 @@ Sentinel/
 | `backend/app/services/browser.py` | Launches Chromium, collects the result, and always closes it. |
 | `backend/app/services/results.py` | Removes credential-shaped text before a result is stored. |
 | `backend/alembic/` | Schema revisions. `0001_create_websites` creates the registry. `0002_create_website_checks` creates check history. |
-| `backend/tests/` | Automated checks for configuration, health, URL rules, the registry, the address policy, and check persistence. |
+| `backend/tests/` | Automated checks for configuration, health, URL rules, the registry, the address policy, check persistence, and the n8n workflow file. |
+| `n8n/workflows/failed-check-follow-up.json` | The manual workflow that reads failed checks and drafts a follow-up. |
 | `frontend/app/page.tsx` | The status page. |
 | `frontend/app/websites/page.tsx` | The website registry page. |
 | `frontend/lib/api.ts` | Server-side fetch of `/health` and `/health/ready`. |
@@ -95,16 +101,18 @@ flowchart TB
   web["Next.js on port 3000"]
   api["FastAPI on port 8000"]
   chromium["Chromium via Playwright"]
+  n8n["n8n on port 5678"]
   db["PostgreSQL on port 5432"]
 
   browser -->|"GET /"| web
   web -->|"GET /health and GET /health/ready"| api
   browser -->|"website and check routes"| api
+  n8n -->|"GET websites and the newest check"| api
   api -->|"SELECT 1, websites, and website_checks"| db
   api -->|"one bounded navigation"| chromium
 ```
 
-The next diagram is a boundary, not a second running system. Dotted arrows are seams we are leaving open. No code on those arrows exists yet.
+The next diagram is a boundary, not a second running system. The dotted arrow is a seam we are leaving open. No code on that arrow exists yet.
 
 ```mermaid
 flowchart LR
@@ -112,22 +120,22 @@ flowchart LR
     web[Next.js]
     api[FastAPI]
     chromium[Playwright Chromium]
+    n8n[n8n]
     db[(PostgreSQL)]
   end
 
   subgraph later [Not built]
     openai[OpenAI]
-    n8n[n8n]
   end
 
   web --> api
   api --> db
   api --> chromium
+  n8n --> api
   api -.-> openai
-  n8n -.-> api
 ```
 
-Playwright drives Chromium against a site the caller says they may test. The OpenAI API will be used later to interpret results. n8n will sit outside this repository and call the API when a workflow needs Sentinel. The check stays inside the API request. A queue is a later decision, made when a check needs to leave that request.
+Playwright drives Chromium against a site the caller says they may test. n8n reads the stored result and drafts a follow-up. It does not send that draft and it does not start a check. The OpenAI API will be used later to interpret results. The check stays inside the API request. A queue is a later decision, made when a check needs to leave that request.
 
 ## Request flow
 
@@ -309,6 +317,16 @@ sequenceDiagram
 
 The registry page asks for the acknowledgement before it sends that request. While the request is in flight the button reads `Checking…`. The result panel shows outcome, status, title, and duration. Console errors and failed requests render only when the row contains them. Check history is a second request, loaded when the row asks for it.
 
+### n8n follow-up
+
+n8n is the process that runs after a check has already been stored. Compose starts `n8nio/n8n:2.46.7` and publishes port `5678`. Its data volume is `sentinel_n8n_data`, a SQLite database for the n8n editor. Sentinel's Postgres password is not passed into that container.
+
+`n8n/workflows/failed-check-follow-up.json` is inactive and has a manual trigger. It sets the API address to `http://host.docker.internal:8000`, lists websites, and requests the newest check for each one. When `outcome` is `failed`, a Set node builds a notification draft. The false branch is empty. There is no schedule trigger and no `POST`.
+
+The address lives in the workflow because current n8n blocks `$env` inside nodes. Opening that access would also let a workflow read every variable in the container. The draft is the last node so a later destination can replace it without changing Sentinel.
+
+The concept, the import command, and the limits are in [n8n follow-up](../learning/n8n-follow-up.md).
+
 ### Health routes
 
 `GET /health` returns:
@@ -346,6 +364,7 @@ Tests are part of the foundation, not a later cleanup.
 - `test_network.py` locks the public-address rule. The resolver is a function the test supplies, so the suite does not call DNS.
 - `test_check_service.py` locks the navigation budget, secret redaction, and the timeout setting. It does not launch Chromium.
 - `test_checks.py` stores scripted results, refuses private targets without calling the runner, and checks that deleting a website deletes the history.
+- `test_n8n_workflow.py` reads the workflow JSON. It checks that the file is inactive, manual, and limited to `GET` requests. It does not start Docker.
 
 ## Design decisions
 
@@ -355,7 +374,7 @@ Tests are part of the foundation, not a later cleanup.
 
 **asyncpg, not psycopg, in the URL.** asyncpg is the driver SQLAlchemy's async PostgreSQL dialect is most often paired with, and wheels for Python 3.14 were available when this milestone was installed. The URL scheme is validated so a sync URL cannot slip through.
 
-**Host processes for the API and the web, Docker only for PostgreSQL.** Edit-and-reload is simpler when Uvicorn and Next.js are local processes. PostgreSQL is the stateful piece, so it is the piece Compose owns. Adding more containers before they earn their keep makes logs and networking harder to teach.
+**Host processes for the API and the web, Docker for PostgreSQL and n8n.** Edit-and-reload is simpler when Uvicorn and Next.js are local processes. PostgreSQL is the stateful piece, so Compose owns it. n8n is a separate application with its own editor and its own SQLite volume, so Compose owns that too. It is not given `DATABASE_URL`. The API address is written in the workflow, because n8n blocks nodes from reading the container environment. Redis and a task queue still have not earned a container.
 
 **No Redis and no Celery.** Saved websites and check results live in PostgreSQL. The API waits for one bounded check. A queue would still be an extra service. Background work can be reconsidered when a check needs to run outside the web request.
 
@@ -409,7 +428,7 @@ FastAPI also installed Starlette 1.10.0, Pydantic 2.14.3, and `python-dotenv` 1.
 
 ### Not installed
 
-The OpenAI SDK, an n8n deployment, Redis, and Celery. Alembic is installed because `websites` and `website_checks` need revisions. Chromium is installed with Playwright's own command, not with pip.
+The OpenAI SDK, Redis, and Celery. Alembic is installed because `websites` and `website_checks` need revisions. Chromium is installed with Playwright's own command, not with pip. n8n is a Docker image, not a Python or Node dependency of this repository.
 
 ## Version identity
 

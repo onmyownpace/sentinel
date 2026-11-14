@@ -1,0 +1,226 @@
+{
+  "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb3301",
+  "name": "Sentinel failed-check follow-up",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Sentinel follow-up\n\nThis workflow is manual. It reads websites and the newest stored check. It does not open a browser, and it does not send email or chat.\n\n**API address** is the Sentinel base URL as seen from this n8n container. Change it when the container cannot reach the API.\n\n**Notification draft** is the message a later Slack or email node would send. Replace that node when you have a destination.\n\nn8n's editor login is not a Sentinel account. Sentinel still has no accounts.",
+        "height": 280,
+        "width": 460,
+        "color": 4
+      },
+      "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb33c7",
+      "name": "How this workflow fits",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [180, 40]
+    },
+    {
+      "parameters": {},
+      "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb33c1",
+      "name": "Run follow-up",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "api-base",
+              "name": "apiBase",
+              "value": "http://host.docker.internal:8000",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb33c2",
+      "name": "API address",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.apiBase }}/api/websites",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb33c3",
+      "name": "List websites",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('API address').first().json.apiBase }}/api/websites/{{ $json.id }}/checks?limit=1",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb33c4",
+      "name": "Latest check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "outcome-failed",
+              "leftValue": "={{ Array.isArray($json) ? $json[0]?.outcome : $json.outcome }}",
+              "rightValue": "failed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb33c5",
+      "name": "Check failed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1200, 400]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "website-name",
+              "name": "website_name",
+              "value": "={{ $('List websites').item.json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "base-url",
+              "name": "base_url",
+              "value": "={{ $('List websites').item.json.base_url }}",
+              "type": "string"
+            },
+            {
+              "id": "outcome",
+              "name": "outcome",
+              "value": "={{ Array.isArray($json) ? $json[0].outcome : $json.outcome }}",
+              "type": "string"
+            },
+            {
+              "id": "http-status",
+              "name": "http_status",
+              "value": "={{ Array.isArray($json) ? $json[0].http_status : $json.http_status }}",
+              "type": "number"
+            },
+            {
+              "id": "error-message",
+              "name": "error_message",
+              "value": "={{ Array.isArray($json) ? $json[0].error_message : $json.error_message }}",
+              "type": "string"
+            },
+            {
+              "id": "checked-at",
+              "name": "checked_at",
+              "value": "={{ Array.isArray($json) ? $json[0].created_at : $json.created_at }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb33c6",
+      "name": "Notification draft",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1440, 300]
+    }
+  ],
+  "connections": {
+    "Run follow-up": {
+      "main": [
+        [
+          {
+            "node": "API address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API address": {
+      "main": [
+        [
+          {
+            "node": "List websites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List websites": {
+      "main": [
+        [
+          {
+            "node": "Latest check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latest check": {
+      "main": [
+        [
+          {
+            "node": "Check failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check failed": {
+      "main": [
+        [
+          {
+            "node": "Notification draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {}
+}

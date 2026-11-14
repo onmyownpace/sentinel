@@ -1,6 +1,7 @@
-# PostgreSQL is the only Compose service.
+# Compose runs PostgreSQL and n8n.
 # The API and the Next.js app run on the host so code reloads stay simple.
-# Redis, workers, and other services are intentionally absent.
+# n8n is a separate app. It calls the API. It is not a worker and not a queue.
+# Redis and Celery are intentionally absent.
 
 name: sentinel
 
@@ -25,5 +26,40 @@ services:
       retries: 10
       start_period: 5s
 
+  n8n:
+    image: n8nio/n8n:2.46.7
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    # The workflow calls Sentinel on the Docker host, not on localhost inside
+    # the container. host-gateway is required on Docker Engine for that name.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_WEBHOOK_URL: http://localhost:5678/
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      GENERIC_TIMEZONE: UTC
+    volumes:
+      # n8n's own SQLite database and editor account. Not Sentinel's Postgres.
+      - sentinel_n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/files:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5678/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+
 volumes:
   sentinel_postgres_data:
+  sentinel_n8n_data:

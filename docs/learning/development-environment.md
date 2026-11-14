@@ -99,23 +99,26 @@ docker compose up -d
 docker compose ps
 ```
 
-`ps` should show `sentinel-postgres-1` as healthy. The healthcheck runs `pg_isready`. The published port is `5432` on both the WSL network and Windows `localhost`.
+`ps` should show `sentinel-postgres-1` as healthy (and `sentinel-n8n-1` healthy when n8n is started). The Postgres healthcheck runs `pg_isready`. The published ports are `5432` and `5678` on both the WSL network and Windows `localhost`.
 
 From PowerShell you can see the forward without a Docker client:
 
 ```powershell
 netstat -ano | findstr ":5432"
+netstat -ano | findstr ":5678"
 ```
 
-The listening process is `wslrelay.exe`. If that line is missing, the container is not published to Windows, and the API cannot reach it at `localhost`.
+The listening process is `wslrelay.exe`. If that line is missing, the container is not published to Windows, and the API cannot reach Postgres at `localhost`.
 
-Stop the container from Ubuntu:
+WSL may stop the Ubuntu distro when every interactive shell exits. When Ubuntu stops, Docker stops with it, the containers exit, and `wslrelay` drops the Windows listeners. Keep at least one Ubuntu session open while you work (a terminal left on `sleep infinity` is enough), or set `vmIdleTimeout=-1` under `[wsl2]` in `%UserProfile%\.wslconfig` so the VM does not idle-exit. Applying that file needs a later `wsl --shutdown`, which also stops Compose; bring the stack back with `docker compose up -d` afterward and do not pass `-v`.
+
+Stop the containers from Ubuntu:
 
 ```bash
 docker compose stop
 ```
 
-`docker compose down` removes the container and keeps the named volume. `docker compose down -v` deletes that volume too. Do not use `-v` unless you mean to throw away the local database. Leave the container running while you use the API.
+`docker compose down` removes the containers and keeps the named volumes. `docker compose down -v` deletes those volumes too. Do not use `-v` unless you mean to throw away the local database and the n8n editor data. Leave the containers running while you use the API.
 
 The default user, password, and database name are all `sentinel`. That password is for a database bound to your machine. It is not a secret to reuse anywhere else.
 
@@ -205,6 +208,26 @@ Invoke-RestMethod http://127.0.0.1:8000/api/websites/<website-id>/checks -Method
 
 `GET http://127.0.0.1:8000/api/websites/<website-id>/checks` returns the newest checks. Add `?limit=5` to take fewer than the default of 20.
 
+## Start n8n
+
+n8n is the follow-up runner. It is not the API and it is not a Sentinel account. From Ubuntu, in this repository:
+
+```bash
+docker compose up -d n8n
+```
+
+The first start downloads `n8nio/n8n:2.46.7`. The volume `sentinel_n8n_data` holds n8n's SQLite database. Import the workflow after the container is up:
+
+```bash
+docker compose exec -u node n8n n8n import:workflow --input=/files/failed-check-follow-up.json
+```
+
+Open `http://localhost:5678` and create the n8n owner when the page asks. Then open **Sentinel failed-check follow-up** and choose **Execute workflow**. The steps, the address the container uses, and the cases that produce no draft are in [n8n follow-up](n8n-follow-up.md).
+
+The API still listens on Windows. The n8n container does not share that loopback. Compose maps `host.docker.internal` to the Docker host, and on this machine that host is Ubuntu: the name resolves to `172.17.0.1`, and a request from the container reached a program listening on Ubuntu port 8000. A request from the container to `172.22.176.1` (the address WSL uses for Windows) timed out. Inside the container, `127.0.0.1` is n8n itself.
+
+Run Uvicorn on Ubuntu, on port 8000, when you want this workflow to call Sentinel. The Windows virtual environment does not run in Ubuntu. Leaving the API on Windows `127.0.0.1` is the narrower bind, and it is the right one while you are not doing that demo. Binding the Windows API to `0.0.0.0` would expose it with no login, and that bind still is not `host.docker.internal`.
+
 ## What happens when you refresh the page
 
 Follow this once with the files open.
@@ -257,6 +280,7 @@ What the tests are allowed to claim:
 | Readiness monkeypatches | The route maps `True` to `200` and `False` to `503`. | That the driver works. |
 | Closed port `127.0.0.1:1` | A real driver failure becomes `503` and the password stays out of the body. | That your `DATABASE_URL` is correct. |
 | `integration` test | `SELECT 1` against the configured database, when the connection succeeds. | Anything, when the test is skipped. |
+| n8n workflow file | The follow-up JSON is manual, inactive, and only sends `GET`. | That n8n started, or that a draft was produced. |
 
 When PostgreSQL is not reachable, `tests/test_database.py` calls `pytest.skip` and includes the exception class name. Expect the suite to pause for about the connect timeout, which is two seconds, on that test. Read the skip line. Do not count it as a database pass.
 
@@ -308,7 +332,7 @@ A failed readiness check logs the exception class only, for example `TimeoutErro
 
 **`DATABASE_URL must start with postgresql+asyncpg://`.** The driver prefix is missing. The async engine will not guess one.
 
-**Port `8000` or `3000` is already in use.** Stop the other process or pass a different port. If you move the API, update the frontend URL. If you move the website, add that origin to `CORS_ORIGINS` before any browser code calls the API.
+**Port `8000`, `3000`, or `5678` is already in use.** Stop the other process or pass a different port. If you move the API, update the frontend URL and the n8n **API address** node. If you move the website, add that origin to `CORS_ORIGINS` before any browser code calls the API. If you move n8n, change `N8N_PORT` and the published mapping together.
 
 **Activate.ps1 cannot be loaded.** Call `.\.venv\Scripts\python.exe` as the examples do.
 
@@ -318,10 +342,18 @@ A failed readiness check logs the exception class only, for example `TimeoutErro
 
 **Checking… ends with a timeout message.** The navigation exceeded `CHECK_NAVIGATION_TIMEOUT_SECONDS`, or the page stopped waiting at 40 seconds. The API may still store a failed row. Open Check history.
 
-**Pytest seems to hang for a few seconds near the end.** That is the integration test waiting on the two-second connect timeout. Let it finish and read whether the test passed or skipped. The check tests do not add a browser download or a public-site visit.
+**n8n cannot open the API.** **API address** is `http://host.docker.internal:8000`. That name is the Docker host. Here, Docker runs in Ubuntu, so the name is not Windows `127.0.0.1`. Start the API on Ubuntu port 8000 (`--host 0.0.0.0`), or change the node to an address you have already opened from the container. Confirm with `docker compose exec -T n8n wget -qO- http://host.docker.internal:8000/health`.
+
+**Windows cannot open `localhost:5432` even though Compose looks up.** Check `wsl -l -v`. If Ubuntu is `Stopped`, start it and run `docker compose up -d` again. Idle shutdown is the usual cause; see the PostgreSQL section above.
+
+**The n8n page asks for an owner.** That is n8n's editor account, stored in `sentinel_n8n_data`. It does not log you into Sentinel.
+
+**`n8n execute` says the task broker port is already in use.** The long-running n8n container owns that port. Stop it, run the one-off execute command from [n8n follow-up](n8n-follow-up.md), then `docker compose up -d n8n` again.
+
+**Pytest seems to hang for a few seconds near the end.** That is the integration test waiting on the two-second connect timeout. Let it finish and read whether the test passed or skipped. The check tests do not add a browser download or a public-site visit. The n8n test does not start a container.
 
 ## What this environment is not
 
 It is not a production deploy. Reload, the default password, and a database published on `localhost` are for learning and local work.
 
-It is not a monitoring service. A check runs once, when you ask, inside the API process. Nothing repeats it, and nothing calls an AI model. There is no account. The authorization checkbox records that you said you may test the site. It does not prove that you may.
+It is not a monitoring service. A check runs once, when you ask, inside the API process. n8n can read a finished check and draft a follow-up, and that draft stays in the n8n execution. Nothing repeats a check, nothing sends the draft on, and nothing calls an AI model. There is no Sentinel account. The authorization checkbox records that you said you may test the site. It does not prove that you may.
