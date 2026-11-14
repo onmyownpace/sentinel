@@ -2,7 +2,7 @@
 
 Sentinel is an AI-powered website testing and monitoring platform. The product will open a site in a browser, record what failed, and use AI to explain the failure. Notifications and follow-up workflows will go through n8n.
 
-Milestone 1 is the development foundation. Milestone 2 adds a website registry. Milestone 3 opens a registered site in Chromium, stores the result, and shows it on the registry page. The product still does not call an AI service, schedule checks, or provide accounts.
+Milestone 1 is the development foundation. Milestone 2 adds a website registry. Milestone 3 opens a registered site in Chromium, stores the result, and shows it on the registry page. n8n can then read those stored results and draft a follow-up message. The product still does not call an AI service, send that message anywhere, schedule checks, or provide accounts.
 
 ## Current status
 
@@ -21,7 +21,7 @@ The running system is a FastAPI process, a Next.js app, and PostgreSQL in Docker
 | `GET /api/checks/{check_id}` | Returns one stored check, or `404`. |
 | Next.js page at `/` | The server calls the two health routes and renders the result. |
 | Next.js page at `/websites` | The browser loads, creates, and deletes websites. Run check asks for an authorization acknowledgement, then shows the outcome, HTTP status, title, duration, console errors, and failed requests. |
-| Pytest | Locks the health contract, the website registry, the address policy, and check persistence. Check tests use a fake browser runner and do not visit public websites. The one connectivity test skips when PostgreSQL is unreachable. A skip is not a passing check. |
+| Pytest | Locks the health contract, the website registry, the address policy, check persistence, and the shape of the n8n follow-up file. Check tests use a fake browser runner and do not visit public websites. The workflow test does not start n8n. The one connectivity test skips when PostgreSQL is unreachable. A skip is not a passing check. |
 
 ## Architecture
 
@@ -33,11 +33,13 @@ flowchart TB
   web["Next.js on port 3000"]
   api["FastAPI on port 8000"]
   chromium["Chromium via Playwright"]
+  n8n["n8n on port 5678"]
   db["PostgreSQL 16 on port 5432"]
 
   browser -->|"GET /"| web
   web -->|"GET /health, then GET /health/ready"| api
   browser -->|"website and check routes"| api
+  n8n -->|"GET websites and the newest check"| api
   api -->|"SELECT 1, websites, and website_checks"| db
   api -->|"one bounded navigation"| chromium
 ```
@@ -54,17 +56,18 @@ In use now:
 - PostgreSQL 16, started by Docker Compose
 - Next.js, React, and TypeScript for the status page and the website registry
 - Playwright's Python async API, and the Chromium build it downloads, for one website check
+- n8n 2.46.7, started by Docker Compose, for a manual follow-up over stored checks
 - Pytest for the API contract
 
 Planned, and not implemented in this repository:
 
 - The OpenAI API for failure analysis
-- n8n for notifications and workflow automation
+- Delivery of the n8n draft to email, chat, or another service
 - A product dashboard, saved monitors, scheduled checks, and user accounts
 - PHP and Laravel in a later milestone, where a second backend fits the architecture
 - Container images for the API and the website, if a later milestone needs them
 
-There is no Redis and no task queue. A check runs inside the API request and stops when its timeout expires. The tables today are `websites` and `website_checks`. Deleting a website deletes its checks.
+There is no Redis and no task queue. A check runs inside the API request and stops when its timeout expires. The n8n workflow only reads stored checks. The Sentinel tables are `websites` and `website_checks`. Deleting a website deletes its checks. n8n keeps a separate SQLite file for its editor.
 
 ## Local development
 
@@ -141,9 +144,13 @@ npm run typecheck
 | `ENVIRONMENT` | API | Returned by the health endpoints. Default `development` |
 | `CORS_ORIGINS` | API | Comma-separated browser origins allowed to call the API. The default lists both localhost and 127.0.0.1 on port 3000 |
 | `CHECK_NAVIGATION_TIMEOUT_SECONDS` | API | How long one navigation may take, from 1 to 60. The default is 15. The runner then allows 10 more seconds for Chromium to start |
+| `N8N_PORT` | Docker Compose | Host port for the n8n editor. Default `5678` |
+| `SENTINEL_API_URL` | Documentation only | Same value as the n8n **API address** node (`http://host.docker.internal:8000`). n8n does not load this variable |
 | `NEXT_PUBLIC_API_URL` | Next.js | API address used by the status page and the registry. Set this in `frontend/.env.local`, not in the root `.env` |
 
 Compose does not build `DATABASE_URL`. If the password in one place changes, change the other. Next.js does not read the root `.env`. When `NEXT_PUBLIC_API_URL` is absent, the page uses `http://localhost:8000`.
+
+n8n is included in `docker compose up -d`. Import and run steps are in [n8n follow-up](docs/learning/n8n-follow-up.md). The workflow only drafts a message; it does not send email or chat.
 
 ### Run a check
 
@@ -171,3 +178,4 @@ Limits that this prototype does not fully close:
 - [Architecture overview](docs/architecture/overview.md) covers the layout, request flow, and design decisions.
 - [Development environment](docs/learning/development-environment.md) is the machine-level setup and troubleshooting order.
 - [Technical walkthrough](docs/learning/milestone-1-technical-walkthrough.md) explains the code that is in the repository today, including the website registry and browser checks.
+- [n8n follow-up](docs/learning/n8n-follow-up.md) explains the workflow, why it only reads stored checks, and how to run it.
