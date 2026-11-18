@@ -28,6 +28,7 @@ export type WebsiteCheck = {
   failed_requests: FailedRequest[];
   error_message: string | null;
   created_at: string;
+  has_screenshot: boolean;
 };
 
 const CHECK_TIMEOUT_MS = 40_000;
@@ -42,13 +43,58 @@ export async function runWebsiteCheck(websiteId: string): Promise<WebsiteCheck> 
   return readCheck(response);
 }
 
-export async function listWebsiteChecks(websiteId: string): Promise<WebsiteCheck[]> {
-  const response = await request(`/api/websites/${websiteId}/checks`);
+export type CheckHistoryWindow = "24h" | "7d" | "all";
+
+export async function listWebsiteChecks(
+  websiteId: string,
+  options?: { window?: CheckHistoryWindow; limit?: number },
+): Promise<WebsiteCheck[]> {
+  const params = new URLSearchParams();
+  params.set("window", options?.window ?? "7d");
+  if (options?.limit != null) {
+    params.set("limit", String(options.limit));
+  }
+  const response = await request(`/api/websites/${websiteId}/checks?${params.toString()}`);
   const body: unknown = await response.json();
   if (!Array.isArray(body) || !body.every(isWebsiteCheck)) {
     throw new WebsiteApiError("The check history was not in the expected shape.", response.status);
   }
   return body;
+}
+
+export async function getCheck(checkId: string, signal?: AbortSignal): Promise<WebsiteCheck> {
+  const response = await request(`/api/checks/${checkId}`, { signal });
+  return readCheck(response);
+}
+
+export async function fetchCheckScreenshot(
+  checkId: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const apiUrl = resolveApiUrl();
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/api/checks/${checkId}/screenshot`, {
+      credentials: "include",
+      signal,
+      cache: "no-store",
+    });
+  } catch (error) {
+    throw new WebsiteApiError(
+      `The API could not be reached at ${apiUrl}. ${describe(error)}`,
+      0,
+    );
+  }
+  if (response.status === 401) {
+    throw new WebsiteApiError("Sign in required.", 401);
+  }
+  if (response.status === 404) {
+    throw new WebsiteApiError("Screenshot not found.", 404);
+  }
+  if (!response.ok) {
+    throw new WebsiteApiError(`The API returned HTTP ${response.status}.`, response.status);
+  }
+  return response.blob();
 }
 
 async function readCheck(response: Response): Promise<WebsiteCheck> {
@@ -65,6 +111,7 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
   try {
     response = await fetch(`${apiUrl}${path}`, {
       ...init,
+      credentials: "include",
       headers: { Accept: "application/json", ...init.headers },
     });
   } catch (error) {
@@ -123,7 +170,8 @@ function isWebsiteCheck(value: unknown): value is WebsiteCheck {
     Array.isArray(value.failed_requests) &&
     value.failed_requests.every(isFailedRequest) &&
     (value.error_message === null || typeof value.error_message === "string") &&
-    typeof value.created_at === "string"
+    typeof value.created_at === "string" &&
+    typeof value.has_screenshot === "boolean"
   );
 }
 

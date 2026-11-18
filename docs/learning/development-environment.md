@@ -131,7 +131,19 @@ From `backend`, apply the schema and then start the API:
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-`alembic upgrade head` creates `websites` and `website_checks` when they are missing. The API does not run migrations on startup. Without those tables, website and check routes return `503` and tell you the schema is not ready. `/health` still returns `200`.
+`alembic upgrade head` creates `websites`, `website_checks`, and `check_failure_analyses` when they are missing, and applies later columns such as `monitoring_enabled`. The API does not run migrations on startup. Without those tables, website, check, and analysis routes return `503` and tell you the schema is not ready. `/health` still returns `200`.
+
+Failure analysis defaults to `ANALYSIS_PROVIDER=simulated` (local heuristics, no AI network calls). Leave `OPENAI_API_KEY` empty for that path. Only when you set `ANALYSIS_PROVIDER=openai` do you need a key; restart the API after changing either value.
+
+Scheduled monitoring needs `SCHEDULE_CHECK_TOKEN` in `.env` (and the same value in the n8n workflow `scheduleToken` field). Leave it empty only if you are not using the scheduled-check route. See [scheduled monitoring](scheduled-monitoring.md).
+
+Optional failure-draft delivery uses `FAILURE_DRAFT_WEBHOOK_URL` in `.env.example` as documentation only — paste the same URL into the n8n `webhookUrl` field. Empty means drafts stay local. See [failure draft delivery](failure-draft-delivery.md).
+
+Optional free local email (AUTO-3): `docker compose --profile mail up -d` starts Mailpit (UI :8025, SMTP :1025). Details: [free email path](free-email-path.md).
+
+Remote free CI (ENG-1): `.github/workflows/ci.yml` runs pytest + frontend typecheck/build on push/PR. Details: [ci.md](ci.md).
+
+Containerized API + web (ENG-4): `docker compose --profile app up -d --build`. Details: [docker-demo.md](docker-demo.md). API stability notes: [api-stability.md](api-stability.md).
 
 Install Chromium in this virtual environment before you run a check yourself. The Python package does not include the browser.
 

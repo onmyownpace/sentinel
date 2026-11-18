@@ -14,8 +14,8 @@ from app.core.config import get_settings
 from app.main import create_app
 
 
-def test_rejects_a_non_http_url(client: TestClient) -> None:
-    response = client.post(
+def test_rejects_a_non_http_url(registry_client: TestClient) -> None:
+    response = registry_client.post(
         "/api/websites",
         json={"name": "Example", "base_url": "ftp://example.com"},
     )
@@ -24,8 +24,8 @@ def test_rejects_a_non_http_url(client: TestClient) -> None:
     assert "postgresql+asyncpg" not in response.text
 
 
-def test_rejects_a_blank_name(client: TestClient) -> None:
-    response = client.post(
+def test_rejects_a_blank_name(registry_client: TestClient) -> None:
+    response = registry_client.post(
         "/api/websites",
         json={"name": "   ", "base_url": "https://example.com"},
     )
@@ -33,10 +33,15 @@ def test_rejects_a_blank_name(client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_rejects_an_id_that_is_not_a_uuid(client: TestClient) -> None:
-    response = client.get("/api/websites/not-a-uuid")
+def test_rejects_an_id_that_is_not_a_uuid(registry_client: TestClient) -> None:
+    response = registry_client.get("/api/websites/not-a-uuid")
 
     assert response.status_code == 422
+
+
+def test_websites_require_sign_in(client: TestClient) -> None:
+    response = client.get("/api/websites")
+    assert response.status_code == 401
 
 
 def test_create_list_get_and_delete_round_trip(registry_client: TestClient) -> None:
@@ -50,6 +55,7 @@ def test_create_list_get_and_delete_round_trip(registry_client: TestClient) -> N
     try:
         assert body["name"] == "Docs"
         assert body["base_url"] == "https://example.com/guide"
+        assert body["monitoring_enabled"] is False
         assert body["created_at"]
         assert body["updated_at"]
 
@@ -138,7 +144,10 @@ def test_missing_table_reports_that_the_schema_is_not_ready(client: TestClient) 
             raise ProgrammingError("SELECT", {}, Exception("relation websites does not exist"))
 
     client.app.state.session_factory = UnreadySession()
-    response = client.get("/api/websites")
+    response = client.get(
+        "/api/websites",
+        headers={"X-Automation-Token": "test-automation-token"},
+    )
 
     assert response.status_code == 503
     assert response.json()["detail"] == (
@@ -154,12 +163,15 @@ def test_website_write_fails_closed_when_postgres_refuses_the_connection(
         "DATABASE_URL",
         "postgresql+asyncpg://sentinel:secret-password@127.0.0.1:1/sentinel",
     )
+    monkeypatch.setenv("AUTOMATION_TOKEN", "test-automation-token")
+    monkeypatch.setenv("SEED_USER_EMAIL", "")
     get_settings.cache_clear()
     try:
         app = create_app()
         with TestClient(app) as client:
             response = client.post(
                 "/api/websites",
+                headers={"X-Automation-Token": "test-automation-token"},
                 json={"name": "Example", "base_url": "https://example.com"},
             )
     finally:

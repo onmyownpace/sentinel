@@ -1,7 +1,15 @@
 "use client";
 
+import Link from "next/link";
+
 import type { Website } from "@/lib/websites";
+import { IncidentDraftPanel } from "@/components/IncidentDraftPanel";
+import { JourneyPanel } from "@/components/JourneyPanel";
+import { PatternHintsPanel } from "@/components/PatternHintsPanel";
+import { ScenarioPanel } from "@/components/ScenarioPanel";
 import { WebsiteChecks } from "@/components/WebsiteChecks";
+import { WebsiteMonitoringConfig } from "@/components/WebsiteMonitoringConfig";
+import { WebsiteStatsPanel } from "@/components/WebsiteStats";
 
 type WebsiteListProps = {
   websites: Website[];
@@ -10,6 +18,7 @@ type WebsiteListProps = {
   onAskDelete: (id: string) => void;
   onConfirmDelete: (id: string) => void;
   onCancelDelete: () => void;
+  onWebsiteUpdated: (website: Website) => void;
 };
 
 export function WebsiteList({
@@ -19,6 +28,7 @@ export function WebsiteList({
   onAskDelete,
   onConfirmDelete,
   onCancelDelete,
+  onWebsiteUpdated,
 }: WebsiteListProps) {
   if (websites.length === 0) {
     return <p className="hint tight">No websites registered yet.</p>;
@@ -39,6 +49,11 @@ export function WebsiteList({
                 </a>
               </p>
               <p className="meta">Added {formatTimestamp(website.created_at)}</p>
+              <p className="meta">
+                Monitoring: {website.monitoring_enabled ? "enrolled" : "off"}
+                {" · "}
+                <Link href={`/websites/${website.id}`}>Open health & config</Link>
+              </p>
             </div>
             {confirming ? (
               <div className="confirm" role="group" aria-label={`Confirm deletion of ${website.name}`}>
@@ -62,6 +77,16 @@ export function WebsiteList({
                 Delete
               </button>
             )}
+            <WebsiteMonitoringConfig
+              website={website}
+              disabled={confirming || deleting}
+              onUpdated={onWebsiteUpdated}
+            />
+            <WebsiteStatsPanel websiteId={website.id} />
+            <PatternHintsPanel websiteId={website.id} disabled={confirming || deleting} />
+            <IncidentDraftPanel websiteId={website.id} disabled={confirming || deleting} />
+            <JourneyPanel websiteId={website.id} disabled={confirming || deleting} />
+            <ScenarioPanel websiteId={website.id} disabled={confirming || deleting} />
             <WebsiteChecks websiteId={website.id} disabled={confirming || deleting} />
           </li>
         );

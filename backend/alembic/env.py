@@ -5,6 +5,7 @@ This file does not store a password of its own.
 """
 
 import asyncio
+import sys
 from logging.config import fileConfig
 
 from alembic import context
@@ -13,9 +14,18 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
+
+# Same Windows + Docker Desktop workaround as app.main / tests.conftest.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from app.models import Base
+from app.models.check_analysis import CheckFailureAnalysis  # noqa: F401
+from app.models.user import User, UserSession  # noqa: F401
 from app.models.website import Website  # noqa: F401
 from app.models.website_check import WebsiteCheck  # noqa: F401
+from app.models.website_incident_draft import WebsiteIncidentDraft  # noqa: F401
+from app.models.website_pattern_hint import WebsitePatternHint  # noqa: F401
 
 config = context.config
 

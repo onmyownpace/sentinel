@@ -1,0 +1,635 @@
+{
+  "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc4401",
+  "name": "Sentinel scheduled website checks",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Sentinel scheduled checks\n\nInactive by default. When activated, this workflow runs every 6 hours, lists websites with `monitoring_enabled=true`, and POSTs each one to `/scheduled-checks` with `X-Schedule-Check-Token`.\n\nAfter each check it GETs `/monitoring-state` (automation token). AUTO-2 uses `should_notify_fail` / `should_notify_latency` / `should_notify_recover` (MON-2 signals gated by per-site rules stored in Sentinel).\n\nSet **API address**: `apiBase`, `scheduleToken`, `automationToken`, and optional `webhookUrl` (webhook.site / Slack Incoming Webhook / Discord — no paid email).\n\n**Deliver draft** runs only when `webhookUrl` is non-empty and continues on delivery errors.\n\nThe workflow does not call an external AI API.",
+        "height": 420,
+        "width": 520,
+        "color": 5
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44c7",
+      "name": "How this workflow fits",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [160, 0]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44c1",
+      "name": "Every 6 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 420]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "api-base",
+              "name": "apiBase",
+              "value": "http://host.docker.internal:8000",
+              "type": "string"
+            },
+            {
+              "id": "schedule-token",
+              "name": "scheduleToken",
+              "value": "change-me-schedule-token",
+              "type": "string"
+            },
+            {
+              "id": "automation-token",
+              "name": "automationToken",
+              "value": "change-me-automation-token",
+              "type": "string"
+            },
+            {
+              "id": "webhook-url",
+              "name": "webhookUrl",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44c2",
+      "name": "API address",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 420]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.apiBase }}/api/websites?monitoring=true",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Automation-Token",
+              "value": "={{ $json.automationToken }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44c3",
+      "name": "List enrolled websites",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('API address').first().json.apiBase }}/api/websites/{{ $json.id }}/scheduled-checks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Schedule-Check-Token",
+              "value": "={{ $('API address').first().json.scheduleToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44c4",
+      "name": "Run scheduled check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 420]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('API address').first().json.apiBase }}/api/websites/{{ $('List enrolled websites').item.json.id }}/monitoring-state",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Automation-Token",
+              "value": "={{ $('API address').first().json.automationToken }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44d0",
+      "name": "Read monitoring state",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 420]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "should-notify-fail",
+              "leftValue": "={{ $json.should_notify_fail }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44c5",
+      "name": "Notify on fail",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "should-notify-latency",
+              "leftValue": "={{ $json.should_notify_latency }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44d3",
+      "name": "Notify on latency",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1440, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "should-notify-recover",
+              "leftValue": "={{ $json.should_notify_recover }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44d1",
+      "name": "Notify on recover",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1440, 700]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "website-name",
+              "name": "website_name",
+              "value": "={{ $('List enrolled websites').item.json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "base-url",
+              "name": "base_url",
+              "value": "={{ $('List enrolled websites').item.json.base_url }}",
+              "type": "string"
+            },
+            {
+              "id": "rule",
+              "name": "rule",
+              "value": "on_fail",
+              "type": "string"
+            },
+            {
+              "id": "latest-outcome",
+              "name": "latest_outcome",
+              "value": "={{ $json.latest_outcome }}",
+              "type": "string"
+            },
+            {
+              "id": "latest-http-status",
+              "name": "latest_http_status",
+              "value": "={{ $json.latest_http_status }}",
+              "type": "number"
+            },
+            {
+              "id": "checked-at",
+              "name": "checked_at",
+              "value": "={{ $json.latest_created_at }}",
+              "type": "string"
+            },
+            {
+              "id": "text",
+              "name": "text",
+              "value": "={{ 'Sentinel still failing: ' + $('List enrolled websites').item.json.name + ' (' + $('List enrolled websites').item.json.base_url + ') status=' + $json.status + ' consecutive_failures=' + $json.consecutive_failures }}",
+              "type": "string"
+            },
+            {
+              "id": "monitoring-status",
+              "name": "monitoring_status",
+              "value": "={{ $json.status }}",
+              "type": "string"
+            },
+            {
+              "id": "still-failing-flag",
+              "name": "still_failing",
+              "value": "={{ $json.still_failing }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44c6",
+      "name": "Failure draft",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1680, 220]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "website-name-l",
+              "name": "website_name",
+              "value": "={{ $('List enrolled websites').item.json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "base-url-l",
+              "name": "base_url",
+              "value": "={{ $('List enrolled websites').item.json.base_url }}",
+              "type": "string"
+            },
+            {
+              "id": "rule-l",
+              "name": "rule",
+              "value": "on_latency",
+              "type": "string"
+            },
+            {
+              "id": "text-l",
+              "name": "text",
+              "value": "={{ 'Sentinel latency breach: ' + $('List enrolled websites').item.json.name + ' (' + $('List enrolled websites').item.json.base_url + ') duration_ms=' + $json.latest_duration_ms + ' threshold_ms=' + $json.latency_threshold_ms }}",
+              "type": "string"
+            },
+            {
+              "id": "monitoring-status-l",
+              "name": "monitoring_status",
+              "value": "={{ $json.status }}",
+              "type": "string"
+            },
+            {
+              "id": "latency-breached-flag",
+              "name": "latency_breached",
+              "value": "={{ $json.latency_breached }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44d4",
+      "name": "Latency draft",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1680, 460]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "website-name-r",
+              "name": "website_name",
+              "value": "={{ $('List enrolled websites').item.json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "base-url-r",
+              "name": "base_url",
+              "value": "={{ $('List enrolled websites').item.json.base_url }}",
+              "type": "string"
+            },
+            {
+              "id": "rule-r",
+              "name": "rule",
+              "value": "on_recover",
+              "type": "string"
+            },
+            {
+              "id": "text-r",
+              "name": "text",
+              "value": "={{ 'Sentinel recovered: ' + $('List enrolled websites').item.json.name + ' (' + $('List enrolled websites').item.json.base_url + ') previous=' + ($json.previous_outcome || 'unknown') + ' now=' + ($json.latest_outcome || 'unknown') }}",
+              "type": "string"
+            },
+            {
+              "id": "monitoring-status-r",
+              "name": "monitoring_status",
+              "value": "={{ $json.status }}",
+              "type": "string"
+            },
+            {
+              "id": "recovered-flag",
+              "name": "recovered",
+              "value": "={{ $json.recovered }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44d2",
+      "name": "Recovery draft",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1680, 700]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "webhook-present",
+              "leftValue": "={{ $('API address').first().json.webhookUrl }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44c8",
+      "name": "Webhook configured",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1920, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('API address').first().json.webhookUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "8d3b0c21-2e5f-4a7b-9c4d-22bb33cc44c9",
+      "name": "Deliver draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 340],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every 6 hours": {
+      "main": [
+        [
+          {
+            "node": "API address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API address": {
+      "main": [
+        [
+          {
+            "node": "List enrolled websites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List enrolled websites": {
+      "main": [
+        [
+          {
+            "node": "Run scheduled check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run scheduled check": {
+      "main": [
+        [
+          {
+            "node": "Read monitoring state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read monitoring state": {
+      "main": [
+        [
+          {
+            "node": "Notify on fail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify on fail": {
+      "main": [
+        [
+          {
+            "node": "Failure draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify on latency",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify on latency": {
+      "main": [
+        [
+          {
+            "node": "Latency draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify on recover",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify on recover": {
+      "main": [
+        [
+          {
+            "node": "Recovery draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Failure draft": {
+      "main": [
+        [
+          {
+            "node": "Webhook configured",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latency draft": {
+      "main": [
+        [
+          {
+            "node": "Webhook configured",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recovery draft": {
+      "main": [
+        [
+          {
+            "node": "Webhook configured",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook configured": {
+      "main": [
+        [
+          {
+            "node": "Deliver draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {}
+}

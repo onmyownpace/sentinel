@@ -77,6 +77,7 @@ def test_readiness_fails_closed_when_postgres_refuses_the_connection(
         "DATABASE_URL",
         "postgresql+asyncpg://sentinel:secret-password@127.0.0.1:1/sentinel",
     )
+    monkeypatch.setenv("SEED_USER_EMAIL", "")
     get_settings.cache_clear()
     try:
         app = create_app()

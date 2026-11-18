@@ -11,7 +11,9 @@ directory the process was started from.
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from typing import Literal
+
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/app/core/config.py -> repository root is three parents up.
@@ -31,14 +33,56 @@ class Settings(BaseSettings):
     app_name: str = "Sentinel"
     app_version: str = "0.1.0"
     environment: str = "development"
+    # Public shell: $0 Render+Neon portfolio mode. Disables live Chromium,
+    # forces simulated AI, and closes open registration. Local default is off.
+    public_shell: bool = False
+    # Explicit kill switch for Playwright execution. Public shell forces off
+    # even if this is left true in a misconfigured env file.
+    live_browser_enabled: bool = True
+    # Open sign-up. Public shell forces this off so the registry is not a
+    # shared writable free-for-all.
+    allow_registration: bool = True
     database_url: str = "postgresql+asyncpg://sentinel:sentinel@localhost:5432/sentinel"
+    # Neon and other hosted Postgres require TLS. None = auto (on when public_shell).
+    # Set DATABASE_SSL=false to force plaintext (local Compose while testing public_shell).
+    database_ssl: bool | None = None
+    # asyncpg connect timeout (seconds). Raise for Neon cold starts in public env.
+    database_connect_timeout_seconds: float = 2
     # Comma-separated browser origins. The status page calls the API from the
     # Next.js server. The website registry calls it from the browser, so the
     # origin of the page has to be listed. localhost and 127.0.0.1 differ.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Session cookie SameSite. Use "none" with HTTPS when UI and API differ by host.
+    session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     # How long one navigation may take. The browser service adds a short
     # allowance for launching Chromium, then stops the check.
     check_navigation_timeout_seconds: float = 15
+    # BROW-1: optional viewport PNG after navigation. Stored under screenshot_dir.
+    screenshot_enabled: bool = True
+    screenshot_dir: str = str(_REPO_ROOT / "backend" / "data" / "screenshots")
+    screenshot_max_bytes: int = 512_000
+    screenshot_timeout_ms: int = 5_000
+    # BROW-2: request-bound journey budget (seconds) for the whole mini-journey.
+    journey_budget_seconds: float = 45
+    # Failure analysis provider. `simulated` is the development default and
+    # never calls an external AI API. `openai` needs OPENAI_API_KEY.
+    analysis_provider: Literal["simulated", "openai"] = "simulated"
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
+    openai_timeout_seconds: float = 30
+    openai_max_output_tokens: int = 1200
+    # Shared secret for n8n scheduled checks. Empty means the scheduled-check
+    # route refuses work. This is a machine acknowledgement, not user auth.
+    schedule_check_token: str | None = None
+    # Shared secret for automation GETs (registry / checks / analysis) from n8n.
+    # Empty means only a signed-in browser session can call those routes.
+    automation_token: str | None = None
+    # Cookie session lifetime for email/password sign-in.
+    session_ttl_days: int = 14
+    # Dev convenience: create this account on API startup when missing.
+    # Leave email empty to skip seeding.
+    seed_user_email: str = "dev@sentinel.local"
+    seed_user_password: str = "dev-password-change-me"
 
     @field_validator("database_url")
     @classmethod
@@ -58,9 +102,125 @@ class Settings(BaseSettings):
             raise ValueError("CHECK_NAVIGATION_TIMEOUT_SECONDS must be between 1 and 60")
         return value
 
+    @field_validator("screenshot_max_bytes")
+    @classmethod
+    def screenshot_max_bytes_must_be_bounded(cls, value: int) -> int:
+        if value < 10_000 or value > 2_000_000:
+            raise ValueError("SCREENSHOT_MAX_BYTES must be between 10000 and 2000000")
+        return value
+
+    @field_validator("screenshot_timeout_ms")
+    @classmethod
+    def screenshot_timeout_must_be_bounded(cls, value: int) -> int:
+        if value < 500 or value > 30_000:
+            raise ValueError("SCREENSHOT_TIMEOUT_MS must be between 500 and 30000")
+        return value
+
+    @field_validator("journey_budget_seconds")
+    @classmethod
+    def journey_budget_must_be_bounded(cls, value: float) -> float:
+        if value < 5 or value > 120:
+            raise ValueError("JOURNEY_BUDGET_SECONDS must be between 5 and 120")
+        return value
+
+    @property
+    def screenshot_root(self) -> Path:
+        return Path(self.screenshot_dir).expanduser()
+
+    @field_validator("analysis_provider", mode="before")
+    @classmethod
+    def analysis_provider_must_be_known(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    @field_validator("openai_timeout_seconds")
+    @classmethod
+    def openai_timeout_must_be_bounded(cls, value: float) -> float:
+        if value < 1 or value > 120:
+            raise ValueError("OPENAI_TIMEOUT_SECONDS must be between 1 and 120")
+        return value
+
+    @field_validator("openai_max_output_tokens")
+    @classmethod
+    def openai_output_tokens_must_be_bounded(cls, value: int) -> int:
+        if value < 100 or value > 4000:
+            raise ValueError("OPENAI_MAX_OUTPUT_TOKENS must be between 100 and 4000")
+        return value
+
+    @field_validator("openai_model")
+    @classmethod
+    def openai_model_must_not_be_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("OPENAI_MODEL must not be blank")
+        return cleaned
+
+    @field_validator("session_ttl_days")
+    @classmethod
+    def session_ttl_must_be_bounded(cls, value: int) -> int:
+        if value < 1 or value > 90:
+            raise ValueError("SESSION_TTL_DAYS must be between 1 and 90")
+        return value
+
+    @field_validator("seed_user_email")
+    @classmethod
+    def seed_email_normalized(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("database_connect_timeout_seconds")
+    @classmethod
+    def database_timeout_must_be_bounded(cls, value: float) -> float:
+        if value < 1 or value > 60:
+            raise ValueError("DATABASE_CONNECT_TIMEOUT_SECONDS must be between 1 and 60")
+        return value
+
+    @field_validator("session_cookie_samesite", mode="before")
+    @classmethod
+    def cookie_samesite_normalized(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    @model_validator(mode="after")
+    def public_shell_safety(self) -> "Settings":
+        if self.public_shell and self.analysis_provider == "openai":
+            # Public shell never calls paid AI — keep config honest at boot.
+            object.__setattr__(self, "analysis_provider", "simulated")
+        if self.session_cookie_samesite == "none" and self.environment.lower() != "production":
+            # Browsers require Secure with SameSite=None; production sets Secure.
+            pass
+        return self
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def browser_execution_allowed(self) -> bool:
+        """False in the public shell or when LIVE_BROWSER_ENABLED=false."""
+        if self.public_shell:
+            return False
+        return self.live_browser_enabled
+
+    @property
+    def registration_allowed(self) -> bool:
+        if self.public_shell:
+            return False
+        return self.allow_registration
+
+    @property
+    def database_ssl_required(self) -> bool:
+        """TLS for asyncpg. Explicit DATABASE_SSL wins; else public_shell defaults on."""
+        if self.database_ssl is not None:
+            return self.database_ssl
+        return self.public_shell
+
+    @property
+    def effective_analysis_provider(self) -> Literal["simulated", "openai"]:
+        if self.public_shell:
+            return "simulated"
+        return self.analysis_provider
 
 
 @lru_cache

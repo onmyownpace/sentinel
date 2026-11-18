@@ -11,6 +11,12 @@ export type Website = {
   id: string;
   name: string;
   base_url: string;
+  monitoring_enabled: boolean;
+  latency_threshold_ms: number | null;
+  failure_threshold_count: number | null;
+  notify_on_fail: boolean;
+  notify_on_recover: boolean;
+  notify_on_latency: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -95,6 +101,15 @@ export async function listWebsites(signal?: AbortSignal): Promise<Website[]> {
   return body;
 }
 
+export async function getWebsite(id: string, signal?: AbortSignal): Promise<Website> {
+  const response = await request(`/api/websites/${id}`, { signal });
+  const body: unknown = await response.json();
+  if (!isWebsite(body)) {
+    throw new WebsiteApiError("The website was not in the expected shape.", response.status);
+  }
+  return body;
+}
+
 export async function createWebsite(input: WebsiteInput): Promise<Website> {
   const response = await request("/api/websites", {
     method: "POST",
@@ -112,12 +127,57 @@ export async function deleteWebsite(id: string): Promise<void> {
   await request(`/api/websites/${id}`, { method: "DELETE" });
 }
 
+export async function setWebsiteMonitoring(
+  id: string,
+  monitoringEnabled: boolean,
+): Promise<Website> {
+  return patchWebsite(id, { monitoring_enabled: monitoringEnabled });
+}
+
+export async function setWebsiteThresholds(
+  id: string,
+  thresholds: {
+    latency_threshold_ms: number | null;
+    failure_threshold_count: number | null;
+  },
+): Promise<Website> {
+  return patchWebsite(id, thresholds);
+}
+
+export async function setWebsiteNotificationRules(
+  id: string,
+  rules: {
+    notify_on_fail: boolean;
+    notify_on_recover: boolean;
+    notify_on_latency: boolean;
+  },
+): Promise<Website> {
+  return patchWebsite(id, rules);
+}
+
+async function patchWebsite(
+  id: string,
+  body: Record<string, boolean | number | null>,
+): Promise<Website> {
+  const response = await request(`/api/websites/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload: unknown = await response.json();
+  if (!isWebsite(payload)) {
+    throw new WebsiteApiError("The updated website was not in the expected shape.", response.status);
+  }
+  return payload;
+}
+
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
   const apiUrl = resolveApiUrl();
   let response: Response;
   try {
     response = await fetch(`${apiUrl}${path}`, {
       ...init,
+      credentials: "include",
       headers: { Accept: "application/json", ...init.headers },
     });
   } catch (error) {
@@ -129,6 +189,12 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
 
   if (response.ok) {
     return response;
+  }
+
+  if (response.status === 401) {
+    throw new WebsiteApiError("Sign in required. Open Login, then return here.", 401, {
+      form: "Sign in required. Open Login, then return here.",
+    });
   }
 
   const detail = await readDetail(response);
@@ -184,6 +250,13 @@ function isWebsite(value: unknown): value is Website {
     typeof value.id === "string" &&
     typeof value.name === "string" &&
     typeof value.base_url === "string" &&
+    typeof value.monitoring_enabled === "boolean" &&
+    (value.latency_threshold_ms === null || typeof value.latency_threshold_ms === "number") &&
+    (value.failure_threshold_count === null ||
+      typeof value.failure_threshold_count === "number") &&
+    typeof value.notify_on_fail === "boolean" &&
+    typeof value.notify_on_recover === "boolean" &&
+    typeof value.notify_on_latency === "boolean" &&
     typeof value.created_at === "string" &&
     typeof value.updated_at === "string"
   );

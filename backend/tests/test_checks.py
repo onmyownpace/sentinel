@@ -277,8 +277,11 @@ def test_history_limit_is_rejected_outside_one_to_fifty(registry_client: TestCli
     assert response.status_code == 422
 
 
-def test_an_id_that_is_not_a_uuid_is_rejected(client: TestClient) -> None:
-    response = client.post("/api/websites/not-a-uuid/checks", json={"authorized": True})
+def test_an_id_that_is_not_a_uuid_is_rejected(registry_client: TestClient) -> None:
+    response = registry_client.post(
+        "/api/websites/not-a-uuid/checks",
+        json={"authorized": True},
+    )
 
     assert response.status_code == 422
 

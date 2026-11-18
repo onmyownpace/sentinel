@@ -1,20 +1,45 @@
+"use client";
+
+import Link from "next/link";
+
+import { FailureAnalysisPanel } from "@/components/FailureAnalysis";
 import type { WebsiteCheck } from "@/lib/checks";
 
 type CheckResultProps = {
   check: WebsiteCheck;
+  disabled?: boolean;
+  showDetailLink?: boolean;
 };
 
-export function CheckResult({ check }: CheckResultProps) {
+export function CheckResult({
+  check,
+  disabled = false,
+  showDetailLink = true,
+}: CheckResultProps) {
   const outcomeClass = check.outcome === "success" ? "ok" : "bad";
   const outcomeLabel = check.outcome === "success" ? "Success" : "Failed";
+  const isDemo =
+    typeof check.error_message === "string" &&
+    check.error_message.includes("Demo result — not a live browser check");
 
   return (
     <div className="check-result">
+      {isDemo ? (
+        <p className="banner warn tight" role="status">
+          Demo result — not a live browser check
+        </p>
+      ) : null}
       <p className={outcomeClass}>
         {outcomeLabel}
         {check.http_status !== null ? ` · HTTP ${check.http_status}` : ""}
         {` · ${check.duration_ms} ms`}
       </p>
+      {showDetailLink ? (
+        <p className="meta">
+          <Link href={`/checks/${check.id}`}>Open check detail</Link>
+          {" · analysis & screenshot stub"}
+        </p>
+      ) : null}
       {check.page_title ? <p className="meta">Title: {check.page_title}</p> : null}
       {check.final_url ? (
         <p className="meta">
@@ -48,6 +73,9 @@ export function CheckResult({ check }: CheckResultProps) {
         </div>
       ) : null}
       <p className="meta">Checked {formatTimestamp(check.created_at)}</p>
+      {check.outcome === "failed" ? (
+        <FailureAnalysisPanel checkId={check.id} disabled={disabled} />
+      ) : null}
     </div>
   );
 }

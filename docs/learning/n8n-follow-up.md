@@ -6,7 +6,7 @@ This explains the first n8n workflow in Sentinel. Read it after the browser-chec
 
 A workflow is a list of steps that a separate program runs. n8n is that program. Sentinel keeps the websites and the check rows. n8n asks Sentinel for those rows and, when the newest check failed, writes a short message you can read in the n8n execution.
 
-The message is a draft. Nothing is emailed and nothing is posted to chat. The draft is the seam where a later Slack or email node will go. Putting the destination in n8n means Sentinel does not grow a mail client of its own.
+The message is a draft. Stock workflows do not email or post to chat until you set `webhookUrl` or add an optional Email node. Putting the destination in n8n means Sentinel does not grow a mail client of its own. For a free local inbox, see [free email path](free-email-path.md) (Mailpit).
 
 n8n calls Sentinel. Sentinel does not call n8n. The arrow matters. The API stays the place that knows how to store a check. n8n stays the place that decides what to do after a result exists. A later feature can add a schedule, a chat message, or an AI explanation without moving the browser code into n8n.
 
@@ -70,13 +70,17 @@ docker compose up -d n8n
 
 If the container cannot open the API, edit **API address** and run it again. On this machine `host.docker.internal` is Ubuntu's Docker bridge, `172.17.0.1`. A request from n8n reached a program listening on Ubuntu port 8000. The API you start from PowerShell on `127.0.0.1` is not that address. A request toward the Windows host address timed out. Run the API on Ubuntu when you want the workflow to call it. The Windows virtual environment does not run there. An Ubuntu bind of `0.0.0.0:8000` is still reachable from Windows at `http://127.0.0.1:8000` through the same WSL port forward that publishes Postgres, so Next.js can keep using localhost while n8n uses `host.docker.internal`.
 
+## Delivery (optional)
+
+After **Notification draft**, **Webhook configured** checks `webhookUrl` from **API address**. When that field is empty, delivery is skipped. When it is set, **Deliver draft** POSTs the draft JSON to that URL and continues even if the webhook errors. Details, Slack/Discord notes, and a Mermaid diagram are in [failure draft delivery](failure-draft-delivery.md).
+
 ## What this leaves open
 
-- No message leaves the machine. Replace **Notification draft** when you choose a destination.
-- Nothing runs on a timer. A schedule can be added in n8n later. It should keep reading stored checks until you deliberately decide that a schedule may start a browser.
-- No OpenAI call. When a key exists, an explanation can be added to the draft. The draft does not need that field to be useful.
-- No Sentinel authentication. Anyone who can reach the API can read the same rows the workflow reads. A later account system will mean this workflow needs a credential. Do not invent a user on the website row to pretend that already happened.
-- n8n is not a queue for Playwright. A check still runs inside the API request. This workflow avoids that wait by not starting a check.
+- Delivery is optional and off until you set `webhookUrl`.
+- Scheduled browser checks are a separate workflow; see [scheduled monitoring](scheduled-monitoring.md).
+- No OpenAI call in this workflow. On-demand analysis stays in the Sentinel UI/API.
+- No Sentinel authentication. Anyone who can reach the API can read the same rows the workflow reads.
+- n8n is not a queue for Playwright. This follow-up only reads stored checks.
 
 ## Mistakes
 

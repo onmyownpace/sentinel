@@ -53,6 +53,18 @@ export default async function HomePage() {
               <dd>{snapshot.liveness.environment}</dd>
             </div>
             <div>
+              <dt>Public shell</dt>
+              <dd>{snapshot.liveness.public_shell ? "yes (demo — no live Chromium)" : "no"}</dd>
+            </div>
+            <div>
+              <dt>Live browser</dt>
+              <dd>{snapshot.liveness.live_browser_enabled === false ? "disabled" : "enabled"}</dd>
+            </div>
+            <div>
+              <dt>Analysis</dt>
+              <dd>{snapshot.liveness.analysis_provider ?? "simulated"}</dd>
+            </div>
+            <div>
               <dt>API address</dt>
               <dd>{snapshot.apiUrl}</dd>
             </div>

@@ -50,6 +50,8 @@ class WebsiteCheck(Base):
     console_errors: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     failed_requests: Mapped[list[dict[str, str]]] = mapped_column(JSONB, nullable=False)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Relative filename under the screenshot storage root, e.g. "{uuid}.png".
+    screenshot_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -57,3 +59,13 @@ class WebsiteCheck(Base):
     )
 
     website: Mapped["Website"] = relationship(back_populates="checks")
+
+    @property
+    def has_screenshot(self) -> bool:
+        return bool(self.screenshot_path)
+    # uselist=False: at most one analysis per check (unique on check_id).
+    failure_analysis: Mapped["CheckFailureAnalysis | None"] = relationship(
+        back_populates="check",
+        uselist=False,
+        passive_deletes=True,
+    )

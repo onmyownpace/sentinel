@@ -6,6 +6,7 @@ connects on first use.
 """
 
 import logging
+import ssl
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -19,18 +20,23 @@ from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
-# Passed through to asyncpg.connect. Two seconds is long enough for a local
-# database and short enough that the status page, which waits longer, can
-# still receive the 503 instead of aborting the request.
-_CONNECT_TIMEOUT_SECONDS = 2
-
 
 def create_db_engine(settings: Settings) -> AsyncEngine:
-    """Build a connection pool for `settings.database_url`."""
+    """Build a connection pool for `settings.database_url`.
+
+    Local Compose Postgres stays plaintext (DATABASE_SSL=false). Neon / public
+    shell enables TLS via asyncpg `ssl=True` without changing the local default.
+    """
+    connect_args: dict = {"timeout": settings.database_connect_timeout_seconds}
+    if settings.database_ssl_required:
+        # Verify TLS for hosted Postgres. Local public_shell misconfig would also
+        # request SSL — operators should point DATABASE_URL at Neon, not Compose.
+        connect_args["ssl"] = ssl.create_default_context()
+
     return create_async_engine(
         settings.database_url,
         pool_pre_ping=True,
-        connect_args={"timeout": _CONNECT_TIMEOUT_SECONDS},
+        connect_args=connect_args,
     )
 
 

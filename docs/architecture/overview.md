@@ -2,7 +2,7 @@
 
 Sentinel is the start of a website testing and monitoring platform. A person will eventually describe a site to watch, the platform will open that site in a browser, and later steps will interpret the result and notify other tools.
 
-Milestone 1 proved three things: the API can answer HTTP, it can open PostgreSQL, and the web app can render that report. Milestone 2 stores websites on that foundation. Milestone 3 opens one registered site in Chromium and stores the result. n8n reads those stored results and drafts a follow-up. It still does not interpret a failure with a model, send the draft, schedule a check, or notify another tool. There is one shared registry and no user accounts.
+Milestone 1 proved three things: the API can answer HTTP, it can open PostgreSQL, and the web app can render that report. Milestone 2 stores websites on that foundation. Milestone 3 opens one registered site in Chromium and stores the result. n8n reads those stored results and drafts a follow-up. On-demand AI analysis can interpret a stored failed check. Opt-in scheduled monitoring and optional webhook draft delivery run through n8n. Email/password accounts and a dashboard protect the registry; n8n uses automation and schedule tokens instead of a browser session. It still does not run autonomous agents or replace n8n with in-process cron.
 
 ## How to read the repository
 
@@ -21,7 +21,11 @@ Sentinel/
 │   └── learning/
 │       ├── development-environment.md
 │       ├── milestone-1-technical-walkthrough.md
-│       └── n8n-follow-up.md
+│       ├── n8n-follow-up.md
+│       ├── ai-failure-analysis.md
+│       ├── scheduled-monitoring.md
+│       ├── failure-draft-delivery.md
+│       └── accounts-and-dashboard.md
 ├── backend/
 │   ├── pyproject.toml
 │   ├── alembic.ini
@@ -29,21 +33,32 @@ Sentinel/
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── api/routes/health.py
+│   │   ├── api/routes/auth.py
+│   │   ├── api/routes/dashboard.py
 │   │   ├── api/routes/websites.py
 │   │   ├── api/routes/checks.py
+│   │   ├── api/routes/analysis.py
 │   │   ├── core/
 │   │   │   ├── config.py
 │   │   │   ├── database.py
 │   │   │   └── urls.py
 │   │   ├── models/website.py
 │   │   ├── models/website_check.py
+│   │   ├── models/check_analysis.py
+│   │   ├── models/user.py
 │   │   └── services/
 │   │       ├── network.py
 │   │       ├── browser.py
-│   │       └── results.py
+│   │       ├── results.py
+│   │       ├── failure_analysis.py
+│   │       ├── passwords.py
+│   │       ├── sessions.py
+│   │       └── seed.py
 │   └── tests/
 ├── n8n/
-│   └── workflows/failed-check-follow-up.json
+│   └── workflows/
+│       ├── failed-check-follow-up.json
+│       └── scheduled-website-checks.json
 └── frontend/
     ├── package.json
     ├── package-lock.json
@@ -55,13 +70,19 @@ Sentinel/
     ├── app/
     │   ├── layout.tsx
     │   ├── page.tsx
+    │   ├── login/page.tsx
+    │   ├── register/page.tsx
+    │   ├── dashboard/page.tsx
     │   ├── websites/page.tsx
     │   └── globals.css
     ├── components/
     └── lib/
         ├── api.ts
+        ├── auth.ts
+        ├── dashboard.ts
         ├── websites.ts
-        └── checks.ts
+        ├── checks.ts
+        └── analysis.ts
 ```
 
 | Path | Purpose |
@@ -74,19 +95,24 @@ Sentinel/
 | `backend/app/api/routes/health.py` | Liveness and readiness routes. |
 | `backend/app/api/routes/websites.py` | Create, list, read, and delete registered websites. |
 | `backend/app/api/routes/checks.py` | Run one check and read its history. |
+| `backend/app/api/routes/analysis.py` | Create or read on-demand AI analysis for a failed check. |
 | `backend/app/models/website.py` | The `websites` table. |
 | `backend/app/models/website_check.py` | The `website_checks` table. Deleting a website deletes these rows. |
+| `backend/app/models/check_analysis.py` | The `check_failure_analyses` table. One analysis per check. |
 | `backend/app/services/network.py` | Rejects targets that are not public HTTP or HTTPS. |
 | `backend/app/services/browser.py` | Launches Chromium, collects the result, and always closes it. |
 | `backend/app/services/results.py` | Removes credential-shaped text before a result is stored. |
-| `backend/alembic/` | Schema revisions. `0001_create_websites` creates the registry. `0002_create_website_checks` creates check history. |
-| `backend/tests/` | Automated checks for configuration, health, URL rules, the registry, the address policy, check persistence, and the n8n workflow file. |
+| `backend/app/services/failure_analysis.py` | Builds evidence, calls OpenAI, and validates the structured result. |
+| `backend/alembic/` | Schema revisions. `0001` websites, `0002` checks, `0003` failure analyses. |
+| `backend/tests/` | Automated checks for configuration, health, URL rules, the registry, the address policy, check persistence, failure analysis, and the n8n workflow file. |
 | `n8n/workflows/failed-check-follow-up.json` | The manual workflow that reads failed checks and drafts a follow-up. |
+| `n8n/workflows/scheduled-website-checks.json` | Inactive schedule that POSTs enrolled sites through `/scheduled-checks`. |
 | `frontend/app/page.tsx` | The status page. |
 | `frontend/app/websites/page.tsx` | The website registry page. |
 | `frontend/lib/api.ts` | Server-side fetch of `/health` and `/health/ready`. |
 | `frontend/lib/websites.ts` | Browser calls to `/api/websites`, plus the form's input checks. |
 | `frontend/lib/checks.ts` | Browser calls that run a check and load its history. |
+| `frontend/lib/analysis.ts` | Browser calls that create or load a failure analysis. |
 | `docs/` | Explanations that should stay accurate as the code changes. |
 
 `backend/.venv/` and `frontend/node_modules/` are created on your machine. They are not part of the design, and git ignores them.
@@ -101,18 +127,20 @@ flowchart TB
   web["Next.js on port 3000"]
   api["FastAPI on port 8000"]
   chromium["Chromium via Playwright"]
+  sim[Simulated analysis]
+  openai[OpenAI API optional]
   n8n["n8n on port 5678"]
   db["PostgreSQL on port 5432"]
 
   browser -->|"GET /"| web
   web -->|"GET /health and GET /health/ready"| api
-  browser -->|"website and check routes"| api
+  browser -->|"website, check, and analysis routes"| api
   n8n -->|"GET websites and the newest check"| api
-  api -->|"SELECT 1, websites, and website_checks"| db
+  api -->|"SELECT 1, websites, checks, analyses"| db
   api -->|"one bounded navigation"| chromium
+  api -->|"default ANALYSIS_PROVIDER"| sim
+  api -->|"optional ANALYSIS_PROVIDER=openai"| openai
 ```
-
-The next diagram is a boundary, not a second running system. The dotted arrow is a seam we are leaving open. No code on that arrow exists yet.
 
 ```mermaid
 flowchart LR
@@ -122,9 +150,10 @@ flowchart LR
     chromium[Playwright Chromium]
     n8n[n8n]
     db[(PostgreSQL)]
+    sim[Simulated analysis]
   end
 
-  subgraph later [Not built]
+  subgraph optional [Optional]
     openai[OpenAI]
   end
 
@@ -132,10 +161,11 @@ flowchart LR
   api --> db
   api --> chromium
   n8n --> api
+  api --> sim
   api -.-> openai
 ```
 
-Playwright drives Chromium against a site the caller says they may test. n8n reads the stored result and drafts a follow-up. It does not send that draft and it does not start a check. The OpenAI API will be used later to interpret results. The check stays inside the API request. A queue is a later decision, made when a check needs to leave that request.
+Playwright drives Chromium against a site the caller says they may test. n8n reads the stored result and drafts a follow-up. It does not send that draft and it does not start a check. Failure analysis defaults to a local simulated provider; OpenAI remains an optional path. The check and the analysis each stay inside their own API request. A queue is a later decision, made when work needs to leave that request.
 
 ## Request flow
 
@@ -317,15 +347,31 @@ sequenceDiagram
 
 The registry page asks for the acknowledgement before it sends that request. While the request is in flight the button reads `Checking…`. The result panel shows outcome, status, title, and duration. Console errors and failed requests render only when the row contains them. Check history is a second request, loaded when the row asks for it.
 
+### AI failure analysis
+
+`CheckFailureAnalysis` stores one structured interpretation of a failed `WebsiteCheck`. The foreign key is unique on `check_id`, so a check has at most one analysis. That uniqueness is the reuse control: `POST /api/checks/{check_id}/analysis` returns the stored row with `200` when one already exists and does not run the provider again.
+
+`ANALYSIS_PROVIDER` selects the engine. The default is `simulated`: `SimulatedAnalysisProvider` builds a deterministic `FailureAnalysisResult` from sanitized WebsiteCheck fields and never opens an AI network connection. `openai` keeps the official SDK path (`OpenAIAnalysisProvider`) for a future paid integration and requires `OPENAI_API_KEY`.
+
+Each stored row records `provider` (`simulated` or `openai`) and `model_name` (`simulated-local` or the OpenAI model id). The API returns those fields; the registry UI banners simulated results so they cannot be mistaken for a live model. The concept and UI path are in [AI failure analysis](../learning/ai-failure-analysis.md).
+
 ### n8n follow-up
 
 n8n is the process that runs after a check has already been stored. Compose starts `n8nio/n8n:2.46.7` and publishes port `5678`. Its data volume is `sentinel_n8n_data`, a SQLite database for the n8n editor. Sentinel's Postgres password is not passed into that container.
 
-`n8n/workflows/failed-check-follow-up.json` is inactive and has a manual trigger. It sets the API address to `http://host.docker.internal:8000`, lists websites, and requests the newest check for each one. When `outcome` is `failed`, a Set node builds a notification draft. The false branch is empty. There is no schedule trigger and no `POST`.
+`n8n/workflows/failed-check-follow-up.json` is inactive and has a manual trigger. It sets `apiBase` and optional `webhookUrl`, lists websites, and requests the newest check for each one. When `outcome` is `failed`, a Set node builds a notification draft (including a Slack-friendly `text` field). **Webhook configured** skips delivery when `webhookUrl` is empty; otherwise **Deliver draft** POSTs the JSON and continues on errors. There is no schedule trigger on this file.
 
-The address lives in the workflow because current n8n blocks `$env` inside nodes. Opening that access would also let a workflow read every variable in the container. The draft is the last node so a later destination can replace it without changing Sentinel.
+The address and webhook URL live in the workflow because current n8n blocks `$env` inside nodes. Opening that access would also let a workflow read every variable in the container.
 
-The concept, the import command, and the limits are in [n8n follow-up](../learning/n8n-follow-up.md).
+The concept, the import command, and the limits are in [n8n follow-up](../learning/n8n-follow-up.md). Delivery details are in [failure draft delivery](../learning/failure-draft-delivery.md).
+
+### Scheduled monitoring
+
+`websites.monitoring_enabled` (default `false`) is the enrollment flag. The registry page toggles it with clear copy that a schedule may open the URL. `GET /api/websites?monitoring=true` is what n8n lists.
+
+`n8n/workflows/scheduled-website-checks.json` is inactive and uses a **6-hour** schedule trigger. It POSTs `/api/websites/{id}/scheduled-checks` with `X-Schedule-Check-Token`. The API compares that header to `SCHEDULE_CHECK_TOKEN`, requires enrollment, and then runs the same bounded Playwright path as a manual check. On failure it builds the same notification draft and uses the same optional webhook delivery gate. It does not bake in Gmail/SES and does not call OpenAI.
+
+Operator steps and limits are in [scheduled monitoring](../learning/scheduled-monitoring.md).
 
 ### Health routes
 
@@ -346,7 +392,7 @@ The route looks up the engine on `app.state`. If startup did not attach one, the
 
 ### Docker Compose
 
-`docker-compose.yml` defines one service, `postgres`, from `postgres:16-alpine`. The major version is pinned so a later `docker compose pull` cannot silently move the database to another major version. The data directory is the named volume `sentinel_postgres_data`, which survives `docker compose down`. Removing the volume is what deletes local data.
+`docker-compose.yml` defines `postgres` (`postgres:16-alpine`), `n8n`, optional `mailpit` (profile `mail`), and optional `api` + `web` (profile `app`, ENG-4). The Postgres major version is pinned so a later `docker compose pull` cannot silently move the database to another major version. Named volumes (`sentinel_postgres_data`, `sentinel_n8n_data`, `sentinel_api_screenshots`) survive `docker compose down`. Removing volumes (`-v`) is what deletes local data. Default `up -d` still leaves API/web on the host for reload; see [docker demo](../learning/docker-demo.md).
 
 The container healthcheck runs `pg_isready`. Compose's own interpolation uses `$`, so the file writes `$$POSTGRES_USER` to leave a single `$` for the shell inside the container.
 
@@ -364,7 +410,9 @@ Tests are part of the foundation, not a later cleanup.
 - `test_network.py` locks the public-address rule. The resolver is a function the test supplies, so the suite does not call DNS.
 - `test_check_service.py` locks the navigation budget, secret redaction, and the timeout setting. It does not launch Chromium.
 - `test_checks.py` stores scripted results, refuses private targets without calling the runner, and checks that deleting a website deletes the history.
-- `test_n8n_workflow.py` reads the workflow JSON. It checks that the file is inactive, manual, and limited to `GET` requests. It does not start Docker.
+- `test_n8n_workflow.py` reads the follow-up workflow JSON. It checks that the file is inactive, manual, gates webhook delivery, and does not bake in email providers. It does not start Docker.
+- `test_scheduled_monitoring.py` covers enrollment, the schedule token gate, and the scheduled workflow shape (inactive, 6-hour trigger, POST + token header, draft-only on failure).
+- `test_failure_analysis.py` covers simulated defaults (including zero external AI sockets), the optional OpenAI settings path, reuse without a second provider call, and rejection of successful checks. It does not call OpenAI.
 
 ## Design decisions
 
@@ -376,7 +424,9 @@ Tests are part of the foundation, not a later cleanup.
 
 **Host processes for the API and the web, Docker for PostgreSQL and n8n.** Edit-and-reload is simpler when Uvicorn and Next.js are local processes. PostgreSQL is the stateful piece, so Compose owns it. n8n is a separate application with its own editor and its own SQLite volume, so Compose owns that too. It is not given `DATABASE_URL`. The API address is written in the workflow, because n8n blocks nodes from reading the container environment. Redis and a task queue still have not earned a container.
 
-**No Redis and no Celery.** Saved websites and check results live in PostgreSQL. The API waits for one bounded check. A queue would still be an extra service. Background work can be reconsidered when a check needs to run outside the web request.
+**No Redis and no Celery.** Saved websites, check results, and analyses live in PostgreSQL. The API waits for one bounded check or one analysis. A queue would still be an extra service. Background work can be reconsidered when that work needs to run outside the web request.
+
+**One analysis per failed check.** Repeating Analyze failure must not spend another OpenAI call. The unique constraint on `check_id` and the POST reuse path enforce that without Redis.
 
 **Fail closed, and stay quiet about why.** Readiness returns `unavailable` for every connection failure: refused, timed out, wrong password, missing database. Website and check routes return `503` for those failures and do not include the driver text. A browser failure becomes a stored `failed` result with a fixed sentence. Callers do not need the driver or Playwright taxonomy. Operators can look at the API log, which records the exception class name and not the message.
 
@@ -401,6 +451,7 @@ Declared directly, because each one is a choice. Versions below are the ones `pi
 | `pydantic-settings` | 2.16.2 | Reads environment variables and `.env` into a typed `Settings` object. |
 | `alembic` | 1.20.1 | Schema revisions. It also installs Mako, which renders revision templates. |
 | `playwright` | 1.64.1 | Python async API that launches Chromium. The browser binary is installed separately with `python -m playwright install chromium`. |
+| `openai` | 3.51.0 | Official Python SDK for on-demand failure analysis via `chat.completions.parse`. |
 
 Playwright also installs `pyee` 14.0.0, which delivers browser events to the check service. The Chromium binary is not a pip package.
 
@@ -428,7 +479,7 @@ FastAPI also installed Starlette 1.10.0, Pydantic 2.14.3, and `python-dotenv` 1.
 
 ### Not installed
 
-The OpenAI SDK, Redis, and Celery. Alembic is installed because `websites` and `website_checks` need revisions. Chromium is installed with Playwright's own command, not with pip. n8n is a Docker image, not a Python or Node dependency of this repository.
+Redis and Celery. Alembic is installed because `websites`, `website_checks`, and `check_failure_analyses` need revisions. Chromium is installed with Playwright's own command, not with pip. n8n is a Docker image, not a Python or Node dependency of this repository.
 
 ## Version identity
 

@@ -27,18 +27,26 @@ class HealthResponse(BaseModel):
     service: str
     version: str
     environment: str
+    public_shell: bool = False
+    live_browser_enabled: bool = True
+    analysis_provider: str = "simulated"
+    registration_open: bool = True
 
 
 class ReadinessResponse(HealthResponse):
     checks: dict[str, str]
 
 
-def _identity() -> dict[str, str]:
+def _identity() -> dict:
     settings = get_settings()
     return {
         "service": _SERVICE_NAME,
         "version": settings.app_version,
         "environment": settings.environment,
+        "public_shell": settings.public_shell,
+        "live_browser_enabled": settings.browser_execution_allowed,
+        "analysis_provider": settings.effective_analysis_provider,
+        "registration_open": settings.registration_allowed,
     }
 
 

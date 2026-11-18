@@ -11,6 +11,8 @@ dependencies = [
   "pydantic-settings>=2.6",
   "alembic>=1.14",
   "playwright>=1.49",
+  "openai>=1.60",
+  "bcrypt>=4.2",
 ]
 
 [project.optional-dependencies]

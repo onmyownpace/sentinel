@@ -4,7 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { WebsiteForm } from "@/components/WebsiteForm";
 import { WebsiteList } from "@/components/WebsiteList";
-import { deleteWebsite, listWebsites, WebsiteApiError, type Website } from "@/lib/websites";
+import {
+  deleteWebsite,
+  listWebsites,
+  WebsiteApiError,
+  type Website,
+} from "@/lib/websites";
 
 export function WebsiteRegistry() {
   const [websites, setWebsites] = useState<Website[]>([]);
@@ -114,6 +119,13 @@ export function WebsiteRegistry() {
             }}
             onConfirmDelete={(id) => void onConfirmDelete(id)}
             onCancelDelete={() => setPendingDeleteId(null)}
+            onWebsiteUpdated={(updated) => {
+              requestId.current += 1;
+              setWebsites((current) =>
+                current.map((website) => (website.id === updated.id ? updated : website)),
+              );
+              setNotice(`${updated.name} monitoring configuration saved.`);
+            }}
           />
         ) : null}
       </section>

@@ -1,6 +1,6 @@
 # Technical walkthrough
 
-This document explains the code that is in the repository today. Sections 1 through 11 are the foundation: a FastAPI process, a Next.js status page, and one PostgreSQL container. Section 12 is the website registry built on that foundation. Section 13 is the browser check that runs against a registered site. The n8n follow-up that reads those checks is a separate note, [n8n follow-up](n8n-follow-up.md), because n8n is another process rather than another Python module.
+This document explains the code that is in the repository today. Sections 1 through 11 are the foundation: a FastAPI process, a Next.js status page, and one PostgreSQL container. Section 12 is the website registry built on that foundation. Section 13 is the browser check that runs against a registered site. The n8n follow-up that reads those checks is a separate note, [n8n follow-up](n8n-follow-up.md), because n8n is another process rather than another Python module. On-demand AI analysis of a failed check is in [AI failure analysis](ai-failure-analysis.md).
 
 Read it next to the files it names. When a section says a function does something, that function is the place to confirm it.
 
@@ -15,7 +15,7 @@ What this checkout actually does:
 - Pytest checks these contracts. One test runs `SELECT 1` against the database in `DATABASE_URL`. The registry and check tests apply the Alembic revisions and then delete the rows they insert. Check tests do not visit public websites. The n8n test only reads the workflow file.
 - n8n can draft a follow-up from a stored failed check. It does not send that draft, and it does not start a browser.
 
-There is no saved monitor, user account, schedule, or call to an external AI service in this code. Websites are remembered, and a person who can call the API can run a check. Nobody owns a row yet. If you cannot find a feature in the files below, it is not implemented.
+There is no saved monitor, user account, or schedule in this code. Websites are remembered, a person who can call the API can run a check, and a failed check can be analyzed on demand when `OPENAI_API_KEY` is set. Nobody owns a row yet. If you cannot find a feature in the files below, it is not implemented.
 
 Setup commands for this machine live in [the development-environment guide](development-environment.md). This walkthrough explains why those commands work.
 

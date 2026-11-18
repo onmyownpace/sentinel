@@ -5,16 +5,16 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Sentinel follow-up\n\nThis workflow is manual. It reads websites and the newest stored check. It does not open a browser, and it does not send email or chat.\n\n**API address** is the Sentinel base URL as seen from this n8n container. Change it when the container cannot reach the API.\n\n**Notification draft** is the message a later Slack or email node would send. Replace that node when you have a destination.\n\nn8n's editor login is not a Sentinel account. Sentinel still has no accounts.",
-        "height": 280,
-        "width": 460,
+        "content": "## Sentinel follow-up\n\nThis workflow is manual and inactive by default. It reads websites and the newest stored check. It does not open a browser.\n\n**API address** holds `apiBase`, `automationToken` (header `X-Automation-Token`, must match `AUTOMATION_TOKEN`), and optional `webhookUrl`. Leave `webhookUrl` empty to keep drafts local. Set it to a free incoming webhook (webhook.site, Slack Incoming Webhook, Discord webhook) to deliver the draft JSON.\n\n**Deliver draft** POSTs only when `webhookUrl` is non-empty. Delivery failures continue the run; Sentinel itself is unchanged.\n\nn8n's editor login is not a Sentinel account.",
+        "height": 320,
+        "width": 480,
         "color": 4
       },
       "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb33c7",
       "name": "How this workflow fits",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [180, 40]
+      "position": [180, 20]
     },
     {
       "parameters": {},
@@ -22,7 +22,7 @@
       "name": "Run follow-up",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [240, 400]
+      "position": [240, 420]
     },
     {
       "parameters": {
@@ -35,6 +35,18 @@
               "name": "apiBase",
               "value": "http://host.docker.internal:8000",
               "type": "string"
+            },
+            {
+              "id": "automation-token",
+              "name": "automationToken",
+              "value": "change-me-automation-token",
+              "type": "string"
+            },
+            {
+              "id": "webhook-url",
+              "name": "webhookUrl",
+              "value": "",
+              "type": "string"
             }
           ]
         },
@@ -44,12 +56,21 @@
       "name": "API address",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [480, 400]
+      "position": [480, 420]
     },
     {
       "parameters": {
         "method": "GET",
         "url": "={{ $json.apiBase }}/api/websites",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Automation-Token",
+              "value": "={{ $json.automationToken }}"
+            }
+          ]
+        },
         "options": {
           "timeout": 10000
         }
@@ -58,12 +79,21 @@
       "name": "List websites",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [720, 400]
+      "position": [720, 420]
     },
     {
       "parameters": {
         "method": "GET",
         "url": "={{ $('API address').first().json.apiBase }}/api/websites/{{ $json.id }}/checks?limit=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Automation-Token",
+              "value": "={{ $('API address').first().json.automationToken }}"
+            }
+          ]
+        },
         "options": {
           "timeout": 10000
         }
@@ -72,7 +102,7 @@
       "name": "Latest check",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [960, 400]
+      "position": [960, 420]
     },
     {
       "parameters": {
@@ -102,7 +132,7 @@
       "name": "Check failed",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1200, 400]
+      "position": [1200, 420]
     },
     {
       "parameters": {
@@ -145,6 +175,12 @@
               "name": "checked_at",
               "value": "={{ Array.isArray($json) ? $json[0].created_at : $json.created_at }}",
               "type": "string"
+            },
+            {
+              "id": "text",
+              "name": "text",
+              "value": "={{ 'Sentinel check failed: ' + $('List websites').item.json.name + ' (' + $('List websites').item.json.base_url + ') HTTP ' + (Array.isArray($json) ? $json[0].http_status : $json.http_status) + ' — ' + (Array.isArray($json) ? ($json[0].error_message || 'no error message') : ($json.error_message || 'no error message')) }}",
+              "type": "string"
             }
           ]
         },
@@ -154,7 +190,64 @@
       "name": "Notification draft",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [1440, 300]
+      "position": [1440, 320]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "webhook-present",
+              "leftValue": "={{ $('API address').first().json.webhookUrl }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb33c8",
+      "name": "Webhook configured",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1680, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('API address').first().json.webhookUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "7c2a9b10-1d4e-4f6a-8b3c-11aa22bb33c9",
+      "name": "Deliver draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, 240],
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -207,6 +300,29 @@
         [
           {
             "node": "Notification draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Notification draft": {
+      "main": [
+        [
+          {
+            "node": "Webhook configured",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook configured": {
+      "main": [
+        [
+          {
+            "node": "Deliver draft",
             "type": "main",
             "index": 0
           }

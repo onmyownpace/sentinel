@@ -54,6 +54,9 @@ class PlaywrightCheckService:
         navigation_timeout_ms: int = 15_000,
         budget_seconds: float | None = None,
         resolve: ResolveHost | None = None,
+        screenshot_enabled: bool = True,
+        screenshot_timeout_ms: int = 5_000,
+        screenshot_max_bytes: int = 512_000,
     ) -> None:
         self.navigation_timeout_ms = navigation_timeout_ms
         self.budget_seconds = (
@@ -62,6 +65,9 @@ class PlaywrightCheckService:
             else (navigation_timeout_ms / 1000) + _LAUNCH_ALLOWANCE_SECONDS
         )
         self._resolve = resolve
+        self.screenshot_enabled = screenshot_enabled
+        self.screenshot_timeout_ms = screenshot_timeout_ms
+        self.screenshot_max_bytes = screenshot_max_bytes
 
     async def run(self, url: str) -> CheckObservation:
         """Run one check and stop it if the budget expires."""
@@ -185,6 +191,13 @@ class PlaywrightCheckService:
                 outcome = "failed"
                 error = UNSAFE_TARGET
 
+            screenshot_png = await _capture_screenshot(
+                page,
+                enabled=self.screenshot_enabled,
+                timeout_ms=self.screenshot_timeout_ms,
+                max_bytes=self.screenshot_max_bytes,
+            )
+
             return sanitize_observation(
                 CheckObservation(
                     outcome=outcome,
@@ -195,6 +208,7 @@ class PlaywrightCheckService:
                     console_errors=tuple(console_errors),
                     failed_requests=tuple(failed_requests),
                     error_message=error,
+                    screenshot_png=screenshot_png,
                 )
             )
         except Exception as exc:
@@ -247,9 +261,43 @@ async def _stop_quietly(playwright) -> None:
         logger.warning("Browser stop failed (%s)", exc.__class__.__name__)
 
 
-def runner_from_settings(timeout_seconds: float, resolve: ResolveHost | None = None) -> PlaywrightCheckService:
+async def _capture_screenshot(
+    page,
+    *,
+    enabled: bool,
+    timeout_ms: int,
+    max_bytes: int,
+) -> bytes | None:
+    """Best-effort viewport PNG. Failures never change the check outcome."""
+    if not enabled:
+        return None
+    try:
+        png = await page.screenshot(type="png", full_page=False, timeout=timeout_ms)
+    except Exception as exc:
+        logger.warning("Website check screenshot failed (%s)", exc.__class__.__name__)
+        return None
+    if not isinstance(png, (bytes, bytearray)):
+        return None
+    raw = bytes(png)
+    if len(raw) > max_bytes or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        logger.warning("Website check screenshot rejected (size or magic)")
+        return None
+    return raw
+
+
+def runner_from_settings(
+    timeout_seconds: float,
+    resolve: ResolveHost | None = None,
+    *,
+    screenshot_enabled: bool = True,
+    screenshot_timeout_ms: int = 5_000,
+    screenshot_max_bytes: int = 512_000,
+) -> PlaywrightCheckService:
     """Build the real runner. Routes call this when no test runner was installed."""
     return PlaywrightCheckService(
         navigation_timeout_ms=round(timeout_seconds * 1000),
         resolve=resolve,
+        screenshot_enabled=screenshot_enabled,
+        screenshot_timeout_ms=screenshot_timeout_ms,
+        screenshot_max_bytes=screenshot_max_bytes,
     )

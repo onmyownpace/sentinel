@@ -27,6 +27,9 @@ htmlcov/
 .coverage
 *.log
 
+# Local check screenshots (BROW-1)
+backend/data/screenshots/
+
 # Private keys
 *.pem
 *.key
@@ -36,3 +39,4 @@ htmlcov/
 Thumbs.db
 .idea/
 .vscode/
+.neon

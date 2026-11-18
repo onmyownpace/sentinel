@@ -39,6 +39,10 @@ class FailedRequestSummary:
     error: str
 
 
+# Viewport PNG cap shared with storage / settings (bytes).
+_MAX_SCREENSHOT_BYTES = 512_000
+
+
 @dataclass(frozen=True)
 class CheckObservation:
     """What one check is allowed to remember."""
@@ -51,6 +55,8 @@ class CheckObservation:
     console_errors: tuple[str, ...]
     failed_requests: tuple[FailedRequestSummary, ...]
     error_message: str | None
+    # Optional PNG bytes from a bounded page.screenshot(); not persisted as-is.
+    screenshot_png: bytes | None = None
 
 
 def elapsed_ms(started: float) -> int:
@@ -72,6 +78,7 @@ def failed_observation(
     final_url: str | None = None,
     console_errors: tuple[str, ...] = (),
     failed_requests: tuple[FailedRequestSummary, ...] = (),
+    screenshot_png: bytes | None = None,
 ) -> CheckObservation:
     """Build a failed result and run it through the same sanitizer as a success."""
     return sanitize_observation(
@@ -84,6 +91,7 @@ def failed_observation(
             console_errors=console_errors,
             failed_requests=failed_requests,
             error_message=message,
+            screenshot_png=screenshot_png,
         )
     )
 
@@ -126,6 +134,18 @@ def sanitize_observation(observation: CheckObservation) -> CheckObservation:
         duration = 0
     duration = min(_MAX_DURATION_MS, max(0, duration))
 
+    png = observation.screenshot_png
+    if png is not None:
+        if (
+            not isinstance(png, (bytes, bytearray))
+            or len(png) < 8
+            or len(png) > _MAX_SCREENSHOT_BYTES
+            or not bytes(png).startswith(b"\x89PNG\r\n\x1a\n")
+        ):
+            png = None
+        else:
+            png = bytes(png)
+
     return CheckObservation(
         outcome=outcome,
         http_status=status,
@@ -135,6 +155,7 @@ def sanitize_observation(observation: CheckObservation) -> CheckObservation:
         console_errors=console_errors,
         failed_requests=tuple(failed_requests),
         error_message=error,
+        screenshot_png=png,
     )
 
 

@@ -15,6 +15,10 @@ export type HealthBody = {
   service: string;
   version: string;
   environment: string;
+  public_shell?: boolean;
+  live_browser_enabled?: boolean;
+  analysis_provider?: string;
+  registration_open?: boolean;
 };
 
 export type ReadinessBody = HealthBody & {
