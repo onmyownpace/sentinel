@@ -731,3 +731,44 @@ input:focus-visible {
 .portfolio-check summary { cursor: pointer; padding: .9rem .3rem; }
 .portfolio-check summary span { margin-inline-start: .55rem; }
 .portfolio-analysis { padding: .25rem 1rem .75rem; }
+
+.portfolio-demo {
+  color: #eaf3ff;
+  --demo-accent: #88f1ef;
+}
+
+.portfolio-intro {
+  padding: clamp(2rem, 6vw, 4rem) 0 1.5rem;
+  background: radial-gradient(ellipse at 28% 0%, #193b4a 0%, transparent 70%);
+}
+
+.portfolio-intro h1 {
+  letter-spacing: -.055em;
+  line-height: 1.06;
+}
+
+.portfolio-badge {
+  color: var(--demo-accent);
+  background: #102c33;
+  border-color: #39767b;
+}
+
+.portfolio-demo .card {
+  background: linear-gradient(145deg, #172638, #141d29);
+  border: 1px solid #304355;
+  border-radius: 1rem;
+}
+
+.portfolio-metrics div { background: #111d2a; }
+.portfolio-metrics strong { color: var(--demo-accent); font-variant-numeric: tabular-nums; }
+.portfolio-check summary:hover, .portfolio-check summary:focus-visible { background: #203248; }
+.portfolio-analysis { color: #c8d9ec; }
+.portfolio-capabilities { margin-top: 2rem; }
+.portfolio-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: .75rem;
+}
+.portfolio-feature-grid > .card { margin: 0; padding: 1rem; }
+.portfolio-feature-grid h3 { margin-top: 0; }
+.portfolio-feature-grid p { margin-bottom: 0; color: #b6c6da; }

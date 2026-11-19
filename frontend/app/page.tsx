@@ -41,7 +41,28 @@ export default function HomePage() {
           </details>
         ))}
       </section>
-      <p className="hint">Live browser checks run in a local Sentinel installation. <Link href="/login">Sign in to your workspace</Link></p>
+      <section className="portfolio-capabilities" aria-labelledby="capabilities">
+        <h2 id="capabilities">What Sentinel can do</h2>
+        <div className="portfolio-feature-grid">
+          <article className="card">
+            <h3>Uptime and latency trends</h3>
+            <p>Compare availability and response times across a time window.</p>
+          </article>
+          <article className="card">
+            <h3>Failure investigation</h3>
+            <p>Inspect failed checks, identify recurring patterns, and draft incident summaries.</p>
+          </article>
+          <article className="card">
+            <h3>Browser journeys</h3>
+            <p>Run multi-step flows, reusable scenarios, and screenshot capture in a local installation.</p>
+          </article>
+          <article className="card">
+            <h3>Scheduled monitoring</h3>
+            <p>Run scheduled checks and deliver incident updates through a local n8n workflow.</p>
+          </article>
+        </div>
+      </section>
+      <p className="hint"><Link href="/login">Sign in to your workspace</Link></p>
     </main>
   );
 }
