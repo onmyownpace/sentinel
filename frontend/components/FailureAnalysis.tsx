@@ -70,10 +70,7 @@ export function FailureAnalysisPanel({ checkId, disabled = false }: FailureAnaly
         </button>
       </div>
       <p className="hint tight">
-        Analysis uses the stored check only. It does not open the site again. Development defaults
-        to a local simulated provider (<code>ANALYSIS_PROVIDER=simulated</code>). Set{" "}
-        <code>ANALYSIS_PROVIDER=openai</code> and <code>OPENAI_API_KEY</code> only when you want a
-        live model call.
+        Analysis uses the saved check result.
       </p>
       {error ? (
         <p className="banner bad" role="alert">

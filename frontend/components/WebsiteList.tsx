@@ -41,42 +41,44 @@ export function WebsiteList({
         const deleting = deletingId === website.id;
         return (
           <li key={website.id} className="website">
-            <div>
-              <h3>{website.name}</h3>
-              <p className="meta">
-                <a href={website.base_url} target="_blank" rel="noreferrer">
-                  {website.base_url}
-                </a>
-              </p>
-              <p className="meta">Added {formatTimestamp(website.created_at)}</p>
-              <p className="meta">
-                Monitoring: {website.monitoring_enabled ? "enrolled" : "off"}
-                {" · "}
-                <Link href={`/websites/${website.id}`}>Open health & config</Link>
-              </p>
-            </div>
-            {confirming ? (
-              <div className="confirm" role="group" aria-label={`Confirm deletion of ${website.name}`}>
-                <p className="hint tight">Delete {website.name} and its check history?</p>
-                <div className="actions">
-                  <button
-                    className="danger"
-                    type="button"
-                    disabled={deleting}
-                    onClick={() => onConfirmDelete(website.id)}
-                  >
-                    {deleting ? "Deleting…" : "Delete"}
-                  </button>
-                  <button type="button" disabled={deleting} onClick={onCancelDelete}>
-                    Cancel
-                  </button>
-                </div>
+            <div className="website-heading">
+              <div>
+                <h3>{website.name}</h3>
+                <p className="meta">
+                  <a href={website.base_url} target="_blank" rel="noreferrer">
+                    {website.base_url}
+                  </a>
+                </p>
+                <p className="meta">Added {formatTimestamp(website.created_at)}</p>
+                <p className="meta">
+                  Monitoring: {website.monitoring_enabled ? "enrolled" : "off"}
+                  {" · "}
+                  <Link href={`/websites/${website.id}`}>Open health & config</Link>
+                </p>
               </div>
-            ) : (
-              <button type="button" onClick={() => onAskDelete(website.id)}>
-                Delete
-              </button>
-            )}
+              {confirming ? (
+                <div className="confirm" role="group" aria-label={`Confirm deletion of ${website.name}`}>
+                  <p className="hint tight">Delete {website.name} and its check history?</p>
+                  <div className="actions">
+                    <button
+                      className="danger"
+                      type="button"
+                      disabled={deleting}
+                      onClick={() => onConfirmDelete(website.id)}
+                    >
+                      {deleting ? "Deleting…" : "Delete"}
+                    </button>
+                    <button type="button" disabled={deleting} onClick={onCancelDelete}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button type="button" onClick={() => onAskDelete(website.id)}>
+                  Delete
+                </button>
+              )}
+            </div>
             <WebsiteMonitoringConfig
               website={website}
               disabled={confirming || deleting}
