@@ -9,9 +9,9 @@ export default function WebsitesPage() {
   return (
     <main className="wide workspace">
       <header className="workspace-hero">
-        <p className="workspace-kicker">Workspace</p>
+        <p className="workspace-kicker">Monitoring console</p>
         <h1>Websites</h1>
-        <p>Manage monitored sites and open their check history.</p>
+        <p>Register sites, then open Site health for overview, investigate, and automation.</p>
       </header>
       <WebsiteRegistry />
     </main>

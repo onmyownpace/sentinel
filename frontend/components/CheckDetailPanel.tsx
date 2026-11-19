@@ -24,6 +24,9 @@ export function CheckDetailPanel({ checkId }: CheckDetailPanelProps) {
     getCheck(checkId, controller.signal)
       .then(setCheck)
       .catch((err: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
         if (err instanceof WebsiteApiError && err.status === 401) {
           router.replace("/login");
           return;
@@ -40,7 +43,9 @@ export function CheckDetailPanel({ checkId }: CheckDetailPanelProps) {
   if (error) {
     return (
       <div className="registry">
-        <p className="banner warn">{error}</p>
+        <p className="banner warn" role="alert">
+          {error}
+        </p>
         <p>
           <Link href="/dashboard">Back to dashboard</Link>
         </p>
@@ -52,6 +57,8 @@ export function CheckDetailPanel({ checkId }: CheckDetailPanelProps) {
     return <p className="hint">Loading check…</p>;
   }
 
+  const failed = check.outcome !== "success";
+
   return (
     <div className="registry check-detail">
       <p className="crumb">
@@ -62,11 +69,32 @@ export function CheckDetailPanel({ checkId }: CheckDetailPanelProps) {
         Check
       </p>
 
-      <section className="card" aria-label="Check detail">
-        <h2>Check detail</h2>
-        <p className="meta">
-          Id <code>{check.id}</code>
-        </p>
+      <section className="card site-summary" aria-label="Stored observation">
+        <div className="site-summary-heading">
+          <div>
+            <h2>Stored observation</h2>
+            <p className="meta">
+              Id <code>{check.id}</code>
+            </p>
+          </div>
+          <div className="status-pills" aria-label="Check outcome">
+            <span className={`status-pill ${failed ? "bad" : "ok"}`}>
+              {failed ? "Failed" : "Success"}
+            </span>
+          </div>
+        </div>
+        {failed ? (
+          <p className="next-action">
+            Next: run <strong>Analyze failure</strong> below, then return to Site Health →
+            Investigate for patterns or an incident draft.
+          </p>
+        ) : (
+          <p className="next-action">
+            Next: return to{" "}
+            <Link href={`/websites/${check.website_id}`}>Site health</Link> for trends and
+            automation.
+          </p>
+        )}
         <CheckResult check={check} showDetailLink={false} />
       </section>
 

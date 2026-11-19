@@ -29,13 +29,20 @@ export function DashboardPanel() {
     getDashboard(controller.signal, windowName)
       .then(setData)
       .catch((err: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
         if (err instanceof WebsiteApiError && err.status === 401) {
           router.replace("/login");
           return;
         }
         setError(err instanceof Error ? err.message : "Could not load the dashboard.");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
     return () => controller.abort();
   }, [router, windowName]);
 
@@ -50,8 +57,17 @@ export function DashboardPanel() {
     return map;
   }, [data]);
 
+  const recentFailures = useMemo(
+    () => (data ? data.recent_checks.filter((check) => check.outcome !== "success") : []),
+    [data],
+  );
+
   if (error) {
-    return <p className="banner warn">{error}</p>;
+    return (
+      <p className="banner warn" role="alert">
+        {error}
+      </p>
+    );
   }
   if (!data || loading) {
     return <p className="hint">Loading dashboard…</p>;
@@ -59,6 +75,13 @@ export function DashboardPanel() {
 
   return (
     <div className="registry dashboard-panel">
+      <AttentionCard
+        health={data.health}
+        windowName={data.stats_window}
+        failures={recentFailures}
+        hasSites={data.websites.length > 0}
+      />
+
       <section className="card health-overview" aria-label="Health overview">
         <div className="stats-toolbar">
           <h2>Health overview</h2>
@@ -80,8 +103,7 @@ export function DashboardPanel() {
       <section className="card" aria-label="Your websites">
         <h2>Your websites</h2>
         <p className="hint tight">
-          Uptime and latency use window <code>{data.stats_window}</code>. Open a site for trends and
-          check drill-down.
+          Open site health for Overview, Investigate, and Automation.
         </p>
         {data.websites.length === 0 ? (
           <p className="hint">
@@ -99,11 +121,12 @@ export function DashboardPanel() {
       <section className="card" aria-label="Recent checks">
         <h2>Recent checks</h2>
         <p className="hint tight">
-          Window <code>{data.history_window}</code> · capped at {data.recent_check_limit} rows (same
-          selector as health overview). Unbounded scans are refused.
+          Window <code>{data.history_window}</code> · capped at {data.recent_check_limit} rows.
         </p>
         {data.recent_checks.length === 0 ? (
-          <p className="hint">No checks in this window. Run one from a site health page or the websites registry.</p>
+          <p className="hint">
+            No checks in this window. Run one from a site health page or the websites registry.
+          </p>
         ) : (
           <ul className="check-history-list">
             {data.recent_checks.map((check) => (
@@ -113,6 +136,96 @@ export function DashboardPanel() {
         )}
       </section>
     </div>
+  );
+}
+
+function AttentionCard({
+  health,
+  windowName,
+  failures,
+  hasSites,
+}: {
+  health: DashboardHealth;
+  windowName: string;
+  failures: DashboardCheck[];
+  hasSites: boolean;
+}) {
+  const leadFailure = failures[0] ?? null;
+
+  if (!hasSites) {
+    return (
+      <section className="card attention-card" aria-label="Needs attention">
+        <h2>Needs attention</h2>
+        <p className="next-action">
+          Next: <Link href="/websites">register a website</Link>, then run a check from Site health.
+        </p>
+        <div className="actions">
+          <Link className="button-link primary" href="/websites">
+            Manage websites
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (health.recent_failure_count === 0) {
+    return (
+      <section className="card attention-card ok-tone" aria-label="Needs attention">
+        <h2>Needs attention</h2>
+        <p>
+          No recent failures in window <code>{windowName}</code>.
+        </p>
+        <p className="next-action">
+          Next: skim Overview trends, or open a site to tune Automation scheduling.
+        </p>
+        <div className="actions">
+          <Link className="button-link" href="/websites">
+            Manage websites
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card attention-card" aria-label="Needs attention">
+      <h2>Needs attention</h2>
+      <p>
+        {health.recent_failure_count} recent failure
+        {health.recent_failure_count === 1 ? "" : "s"} across {health.sites_with_failures} site
+        {health.sites_with_failures === 1 ? "" : "s"} in window <code>{windowName}</code>.
+      </p>
+      <p className="next-action">
+        Next: open a failed check, run analysis, then use Site Health → Investigate for patterns or
+        an incident draft.
+      </p>
+      {leadFailure ? (
+        <ul className="check-history-list attention-failures">
+          <li>
+            <p>
+              <span className="bad">{leadFailure.outcome}</span>
+              {" · "}
+              <Link href={`/checks/${leadFailure.id}`}>
+                {leadFailure.website_name} · {leadFailure.duration_ms} ms
+              </Link>
+            </p>
+            {leadFailure.error_message ? (
+              <p className="meta">{leadFailure.error_message}</p>
+            ) : null}
+            <p className="meta">
+              <Link href={`/checks/${leadFailure.id}`}>Analyze this failure</Link>
+              {" · "}
+              <Link href={`/websites/${leadFailure.website_id}`}>Open site health</Link>
+            </p>
+          </li>
+        </ul>
+      ) : null}
+      <div className="actions">
+        <Link className="button-link" href="/websites">
+          Manage websites
+        </Link>
+      </div>
+    </section>
   );
 }
 
@@ -162,7 +275,7 @@ function HealthGrid({
         </div>
       </dl>
       <p className="hint tight">
-        Roll-up from MON-1 stats for window <code>{windowName}</code>. No chart SaaS.
+        Roll-up for window <code>{windowName}</code>.
       </p>
     </>
   );
@@ -202,7 +315,7 @@ function WebsiteRow({
           </p>
         ) : null}
         <p className="meta">
-          <Link href={`/websites/${site.id}`}>Open health & trends</Link>
+          <Link href={`/websites/${site.id}`}>Open site health</Link>
         </p>
       </div>
     </li>
@@ -210,10 +323,11 @@ function WebsiteRow({
 }
 
 function CheckRow({ check }: { check: DashboardCheck }) {
+  const failed = check.outcome !== "success";
   return (
     <li>
       <p>
-        <span className={check.outcome === "success" ? "ok" : "bad"}>{check.outcome}</span>
+        <span className={failed ? "bad" : "ok"}>{check.outcome}</span>
         {" · "}
         <Link href={`/websites/${check.website_id}`}>{check.website_name}</Link>
         {" · "}
@@ -223,7 +337,11 @@ function CheckRow({ check }: { check: DashboardCheck }) {
       <p className="meta">{new Date(check.created_at).toLocaleString()}</p>
       {check.error_message ? <p className="meta">{check.error_message}</p> : null}
       <p className="meta">
-        <Link href={`/checks/${check.id}`}>Open check detail</Link>
+        {failed ? (
+          <Link href={`/checks/${check.id}`}>Analyze this failure</Link>
+        ) : (
+          <Link href={`/checks/${check.id}`}>Open check detail</Link>
+        )}
       </p>
     </li>
   );

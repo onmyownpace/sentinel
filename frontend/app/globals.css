@@ -38,7 +38,7 @@ body {
   margin: 0;
   padding: 0.75rem 1.25rem;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, #c47d0e 12%, var(--card));
+  background: color-mix(in srgb, #388caa 10%, var(--card));
   color: var(--text);
 }
 
@@ -46,12 +46,6 @@ body {
   margin: 0;
   max-width: 52rem;
   font-size: 0.95rem;
-}
-
-.banner.warn {
-  background: color-mix(in srgb, #c47d0e 14%, var(--card));
-  border: 1px solid color-mix(in srgb, #c47d0e 35%, var(--line));
-  color: var(--text);
 }
 
 .banner.tight,
@@ -90,8 +84,15 @@ nav a {
   text-decoration: none;
 }
 
-nav a:hover {
+nav a:hover,
+nav a.nav-active {
   color: var(--text);
+}
+
+.nav-sep {
+  color: var(--line);
+  font-weight: 400;
+  user-select: none;
 }
 
 .nav-user {
@@ -276,6 +277,17 @@ input:focus-visible {
   border-color: var(--line);
   background: color-mix(in srgb, #388caa 10%, var(--card));
   color: var(--text);
+}
+
+.banner.ok {
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--line));
+  background: color-mix(in srgb, var(--ok) 12%, var(--card));
+}
+
+.banner.bad {
+  border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
+  background: color-mix(in srgb, var(--bad) 10%, var(--card));
+  color: var(--bad);
 }
 
 .website-list {
@@ -794,15 +806,22 @@ input:focus-visible {
 
 .workspace.wide { max-width: 74rem; }
 .workspace-hero {
-  padding: clamp(1.35rem, 5vw, 3rem);
-  margin-bottom: 1.5rem;
+  padding: clamp(1.35rem, 5vw, 2.5rem);
+  margin-bottom: 1.25rem;
   border: 1px solid var(--line);
   border-radius: 1rem;
-  background: radial-gradient(ellipse at 0 0, color-mix(in srgb, #1692a8 21%, var(--card)), var(--card) 70%);
+  background: radial-gradient(ellipse at 0 0, color-mix(in srgb, #1692a8 18%, var(--card)), var(--card) 72%);
 }
-.workspace-hero h1 { margin: .35rem 0; font-size: clamp(2rem, 6vw, 3.4rem); letter-spacing: -.055em; }
-.workspace-hero p { margin: 0; }
-.workspace-kicker { font-size: .78rem; text-transform: uppercase; letter-spacing: .16em; font-weight: 700; }
+.workspace-hero h1 { margin: .35rem 0; font-size: clamp(1.85rem, 5vw, 3rem); letter-spacing: -.04em; }
+.workspace-hero p { margin: 0; color: var(--muted); max-width: 40rem; }
+.workspace-kicker {
+  margin: 0;
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  font-weight: 700;
+  color: var(--muted);
+}
 .workspace .card { border-radius: 1rem; }
 .workspace-tool {
   padding: .85rem 1rem;
@@ -812,8 +831,171 @@ input:focus-visible {
 }
 .workspace-tool summary { cursor: pointer; font-weight: 650; }
 .workspace-tool[open] summary { margin-bottom: .9rem; }
-.workspace .dashboard-panel { grid-template-columns: minmax(0, 1fr); }
+
+.site-summary-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.site-summary-heading h2 {
+  margin: 0 0 0.25rem;
+}
+
+.status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: lowercase;
+}
+
+.status-pill.bad {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
+  background: color-mix(in srgb, var(--bad) 12%, var(--card));
+}
+
+.status-pill.ok {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--line));
+  background: color-mix(in srgb, var(--ok) 12%, var(--card));
+}
+
+.status-pill.outline {
+  background: transparent;
+}
+
+.next-action {
+  margin: 0.75rem 0 0.35rem;
+  padding: 0.55rem 0.75rem;
+  border-left: 3px solid color-mix(in srgb, #1692a8 55%, var(--line));
+  background: color-mix(in srgb, #1692a8 8%, var(--card));
+  border-radius: 0 6px 6px 0;
+  color: var(--text);
+}
+
+.console-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.85rem;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: var(--card);
+}
+
+.console-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.45rem 0.9rem;
+  border-radius: 0.65rem;
+}
+
+.console-tab:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+
+.console-tab.active {
+  color: #0f4f5c;
+  background: color-mix(in srgb, #1692a8 16%, var(--card));
+  border-color: color-mix(in srgb, #1692a8 28%, var(--line));
+}
+
+@media (prefers-color-scheme: dark) {
+  .console-tab.active {
+    color: #b7e8ef;
+  }
+}
+
+.tab-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.tool-section-header {
+  margin-bottom: 0.55rem;
+}
+
+.tool-section-header h2 {
+  margin-bottom: 0.2rem;
+}
+
+.attention-card {
+  border-color: color-mix(in srgb, var(--bad) 28%, var(--line));
+  background: color-mix(in srgb, var(--bad) 6%, var(--card));
+}
+
+.attention-card.ok-tone {
+  border-color: color-mix(in srgb, var(--ok) 28%, var(--line));
+  background: color-mix(in srgb, var(--ok) 6%, var(--card));
+}
+
+.attention-failures {
+  margin-top: 0.35rem;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.button-link.primary {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+
+.workspace .dashboard-panel {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace .dashboard-panel > .attention-card,
+.workspace .dashboard-panel > .health-overview {
+  grid-column: 1 / -1;
+}
+
 @media (min-width: 900px) {
-  .workspace .dashboard-panel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .workspace .health-overview { grid-column: 1 / -1; }
+  .workspace .dashboard-panel {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .workspace-hero {
+    padding: 1.1rem 1rem;
+  }
+
+  .console-tabs {
+    gap: 0.25rem;
+  }
+
+  .console-tab {
+    flex: 1 1 auto;
+    text-align: center;
+  }
 }
