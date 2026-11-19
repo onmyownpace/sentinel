@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     # never calls an external AI API. `openai` needs OPENAI_API_KEY.
     analysis_provider: Literal["simulated", "openai"] = "simulated"
     openai_api_key: str | None = None
+    openai_base_url: str | None = None
     openai_model: str = "gpt-4o-mini"
     openai_timeout_seconds: float = 30
     openai_max_output_tokens: int = 1200

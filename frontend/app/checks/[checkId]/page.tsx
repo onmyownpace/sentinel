@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: CheckPageProps) {
 export default async function CheckDetailPage({ params }: CheckPageProps) {
   const { checkId } = await params;
   return (
-    <main className="wide">
+    <main className="wide workspace">
       <h1>Check detail</h1>
       <p>
         Full stored observation, on-demand failure analysis when the check failed, and the optional

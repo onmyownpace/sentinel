@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: SitePageProps) {
 export default async function SiteHealthPage({ params }: SitePageProps) {
   const { websiteId } = await params;
   return (
-    <main className="wide">
+    <main className="wide workspace">
       <h1>Site health</h1>
       <p>
         Per-site uptime, latency trends, monitoring state, and check history. Charts are local SVG

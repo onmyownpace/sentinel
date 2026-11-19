@@ -791,3 +791,29 @@ input:focus-visible {
 .portfolio-feature-grid > .card { margin: 0; padding: 1rem; }
 .portfolio-feature-grid h3 { margin-top: 0; }
 .portfolio-feature-grid p { margin-bottom: 0; color: #b6c6da; }
+
+.workspace.wide { max-width: 74rem; }
+.workspace-hero {
+  padding: clamp(1.35rem, 5vw, 3rem);
+  margin-bottom: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: radial-gradient(ellipse at 0 0, color-mix(in srgb, #1692a8 21%, var(--card)), var(--card) 70%);
+}
+.workspace-hero h1 { margin: .35rem 0; font-size: clamp(2rem, 6vw, 3.4rem); letter-spacing: -.055em; }
+.workspace-hero p { margin: 0; }
+.workspace-kicker { font-size: .78rem; text-transform: uppercase; letter-spacing: .16em; font-weight: 700; }
+.workspace .card { border-radius: 1rem; }
+.workspace-tool {
+  padding: .85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: .75rem;
+  background: var(--bg);
+}
+.workspace-tool summary { cursor: pointer; font-weight: 650; }
+.workspace-tool[open] summary { margin-bottom: .9rem; }
+.workspace .dashboard-panel { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) {
+  .workspace .dashboard-panel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .workspace .health-overview { grid-column: 1 / -1; }
+}

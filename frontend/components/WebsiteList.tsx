@@ -79,16 +79,21 @@ export function WebsiteList({
                 </button>
               )}
             </div>
-            <WebsiteMonitoringConfig
-              website={website}
-              disabled={confirming || deleting}
-              onUpdated={onWebsiteUpdated}
-            />
+            <details className="workspace-tool">
+              <summary>Monitoring settings</summary>
+              <WebsiteMonitoringConfig website={website} disabled={confirming || deleting} onUpdated={onWebsiteUpdated} />
+            </details>
             <WebsiteStatsPanel websiteId={website.id} />
-            <PatternHintsPanel websiteId={website.id} disabled={confirming || deleting} />
-            <IncidentDraftPanel websiteId={website.id} disabled={confirming || deleting} />
-            <JourneyPanel websiteId={website.id} disabled={confirming || deleting} />
-            <ScenarioPanel websiteId={website.id} disabled={confirming || deleting} />
+            <details className="workspace-tool">
+              <summary>Investigate failures</summary>
+              <PatternHintsPanel websiteId={website.id} disabled={confirming || deleting} />
+              <IncidentDraftPanel websiteId={website.id} disabled={confirming || deleting} />
+            </details>
+            <details className="workspace-tool">
+              <summary>Browser journeys and scenarios</summary>
+              <JourneyPanel websiteId={website.id} disabled={confirming || deleting} />
+              <ScenarioPanel websiteId={website.id} disabled={confirming || deleting} />
+            </details>
             <WebsiteChecks websiteId={website.id} disabled={confirming || deleting} />
           </li>
         );

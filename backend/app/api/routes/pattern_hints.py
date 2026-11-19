@@ -90,6 +90,7 @@ def get_resolved_pattern_provider(request: Request) -> ResolvedPatternHintProvid
         return pattern_provider_from_settings(
             analysis_provider=settings.effective_analysis_provider,
             api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
             model=settings.openai_model,
             timeout_seconds=settings.openai_timeout_seconds,
             max_output_tokens=settings.openai_max_output_tokens,

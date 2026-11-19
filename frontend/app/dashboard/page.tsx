@@ -7,12 +7,12 @@ export const metadata = {
 
 export default function DashboardPage() {
   return (
-    <main className="wide">
-      <h1>Dashboard</h1>
-      <p>
-        Account health overview with MON-1 uptime and latency, links into per-site drill-down, and
-        recent checks. Sign in is required.
-      </p>
+    <main className="wide workspace">
+      <header className="workspace-hero">
+        <p className="workspace-kicker">Workspace</p>
+        <h1>Monitoring overview</h1>
+        <p>Review site health, response times, and recent failures.</p>
+      </header>
       <DashboardPanel />
     </main>
   );
