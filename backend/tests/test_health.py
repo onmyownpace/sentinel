@@ -13,16 +13,17 @@ from app.main import create_app
 
 
 def test_liveness_does_not_depend_on_the_database(client: TestClient) -> None:
+    settings = get_settings()
     response = client.get("/health")
 
     assert response.status_code == 200
     # Liveness stays DB-free but includes public-shell deployment flags from
-    # HealthResponse (same shape as main since the public-shell deploy path).
+    # HealthResponse. environment follows settings (development locally, test in CI).
     assert response.json() == {
         "status": "ok",
         "service": "sentinel-api",
-        "version": "0.1.0",
-        "environment": "development",
+        "version": settings.app_version,
+        "environment": settings.environment,
         "public_shell": False,
         "live_browser_enabled": True,
         "analysis_provider": "simulated",
