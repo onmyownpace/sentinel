@@ -9,7 +9,8 @@ export function SiteHeader() {
         Sentinel
       </Link>
       <nav aria-label="Primary">
-        <Link href="/">Status</Link>
+        <Link href="/">Explore demo</Link>
+        <Link href="/status">Status</Link>
         <Link href="/dashboard">Dashboard</Link>
         <Link href="/websites">Websites</Link>
         <AuthNav />
