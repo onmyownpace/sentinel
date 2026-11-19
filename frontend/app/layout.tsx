@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
-import { PublicShellBanner } from "@/components/PublicShellBanner";
 import { SiteHeader } from "@/components/SiteHeader";
 
 import "./globals.css";
@@ -16,7 +15,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <SiteHeader />
-        <PublicShellBanner />
         {children}
       </body>
     </html>

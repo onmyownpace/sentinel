@@ -1,95 +1,47 @@
-import { getApiSnapshot } from "@/lib/api";
+import Link from "next/link";
 
-export const dynamic = "force-dynamic";
+const sampleChecks = [
+  { status: "503", label: "Service unavailable", duration: 88, failed: true },
+  { status: "200", label: "Homepage reachable", duration: 142, failed: false },
+];
 
-function tone(value: string | null | undefined): string {
-  if (value === "ok") {
-    return "ok";
-  }
-  if (value === null || value === undefined) {
-    return "";
-  }
-  return "bad";
-}
-
-export default async function HomePage() {
-  const snapshot = await getApiSnapshot();
-  const database = snapshot.readiness?.checks.database ?? null;
-
+export default function HomePage() {
   return (
-    <main>
-      <h1>Sentinel</h1>
-      <p>
-        This page asks the API whether the process is up and whether
-        PostgreSQL answered a connectivity check.
-      </p>
+    <main className="portfolio-demo">
+      <header className="portfolio-intro">
+        <span className="portfolio-badge">Read-only demo</span>
+        <h1>Website monitoring</h1>
+        <p>Explore a sample check history and see how Sentinel explains a failure.</p>
+      </header>
 
-      <section className="card" aria-label="Runtime status">
-        <h2>Runtime status</h2>
-        {snapshot.reached && snapshot.liveness && snapshot.readiness ? (
-          <dl>
-            <div>
-              <dt>API process</dt>
-              <dd className={tone(snapshot.liveness.status)}>
-                {snapshot.liveness.status} ({snapshot.livenessStatus})
-              </dd>
-            </div>
-            <div>
-              <dt>Database</dt>
-              <dd className={tone(database)}>
-                {database} ({snapshot.readinessStatus})
-              </dd>
-            </div>
-            <div>
-              <dt>Service</dt>
-              <dd>{snapshot.liveness.service}</dd>
-            </div>
-            <div>
-              <dt>Version</dt>
-              <dd>{snapshot.liveness.version}</dd>
-            </div>
-            <div>
-              <dt>Environment</dt>
-              <dd>{snapshot.liveness.environment}</dd>
-            </div>
-            <div>
-              <dt>Public shell</dt>
-              <dd>{snapshot.liveness.public_shell ? "yes (demo — no live Chromium)" : "no"}</dd>
-            </div>
-            <div>
-              <dt>Live browser</dt>
-              <dd>{snapshot.liveness.live_browser_enabled === false ? "disabled" : "enabled"}</dd>
-            </div>
-            <div>
-              <dt>Analysis</dt>
-              <dd>{snapshot.liveness.analysis_provider ?? "simulated"}</dd>
-            </div>
-            <div>
-              <dt>API address</dt>
-              <dd>{snapshot.apiUrl}</dd>
-            </div>
-          </dl>
-        ) : (
-          <p className="bad">The API could not be read. {snapshot.error}</p>
-        )}
-        {snapshot.reached ? (
-          <p className="hint">
-            <a href={`${snapshot.apiUrl}/docs`}>Open the API documentation</a>
-          </p>
-        ) : null}
-        {snapshot.reached && database !== "ok" ? (
-          <p className="hint">
-            PostgreSQL did not answer. Start it with Docker Compose from the
-            repository root, then refresh this page.
-          </p>
-        ) : null}
-        {!snapshot.reached ? (
-          <p className="hint">
-            Start the API from the backend directory, then refresh. The
-            expected address is {snapshot.apiUrl}.
-          </p>
-        ) : null}
+      <section className="card portfolio-checks" aria-labelledby="sample-site">
+        <h2 id="sample-site">Example status page</h2>
+        <p className="hint">example.com · Sample data</p>
+        <div className="portfolio-metrics">
+          <div><strong>2</strong><span>Checks</span></div>
+          <div><strong>1</strong><span>Failure</span></div>
+          <div><strong>115 ms</strong><span>Average response</span></div>
+        </div>
+        <h3>Check history</h3>
+        {sampleChecks.map(({ status, label, duration, failed }) => (
+          <details key={status} className="portfolio-check">
+            <summary>
+              <span className={failed ? "bad" : "ok"}>HTTP {status}</span>
+              <span>{label}</span>
+              <span className="hint">{duration} ms</span>
+            </summary>
+            {failed ? (
+              <div className="portfolio-analysis">
+                <strong>Sample failure analysis</strong>
+                <p>The server returned HTTP 503. Check service health and recent deployments before retrying.</p>
+              </div>
+            ) : (
+              <p className="portfolio-analysis">The sample homepage returned HTTP 200.</p>
+            )}
+          </details>
+        ))}
       </section>
+      <p className="hint">Live browser checks run in a local Sentinel installation. <Link href="/login">Sign in to your workspace</Link></p>
     </main>
   );
 }

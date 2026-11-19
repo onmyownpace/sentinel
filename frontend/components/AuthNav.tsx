@@ -6,12 +6,20 @@ import { useRouter } from "next/navigation";
 
 import { AuthUser, getCurrentUser, logoutAccount } from "@/lib/auth";
 
+import { getDeploymentMode } from "@/lib/deployment";
+
 export function AuthNav() {
   const router = useRouter();
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
 
+  const [registrationOpen, setRegistrationOpen] = useState(false);
+
   useEffect(() => {
     const controller = new AbortController();
+    getDeploymentMode(AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]))
+      .then((mode) => {
+        if (!controller.signal.aborted) setRegistrationOpen(mode.registrationOpen);
+      });
     getCurrentUser(controller.signal)
       .then(setUser)
       .catch(() => setUser(null));
@@ -37,7 +45,7 @@ export function AuthNav() {
     return (
       <>
         <Link href="/login">Login</Link>
-        <Link href="/register">Register</Link>
+        {registrationOpen && <Link href="/register">Register</Link>}
       </>
     );
   }

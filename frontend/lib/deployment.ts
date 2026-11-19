@@ -15,7 +15,7 @@ const DEFAULT_MODE: DeploymentMode = {
   publicShell: false,
   liveBrowserEnabled: true,
   analysisProvider: "simulated",
-  registrationOpen: true,
+  registrationOpen: false,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
