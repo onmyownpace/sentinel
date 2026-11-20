@@ -7,6 +7,7 @@
  */
 
 import { resolveApiUrl } from "@/lib/api";
+import { createPublicDemoAnalysis, getPublicDemoAnalysis } from "@/lib/publicDemo";
 import { WebsiteApiError } from "@/lib/websites";
 
 export type AnalysisSeverity = "low" | "medium" | "high" | "critical";
@@ -37,11 +38,18 @@ export type FailureAnalysis = {
 const ANALYSIS_TIMEOUT_MS = 40_000;
 
 export async function createCheckAnalysis(checkId: string): Promise<FailureAnalysis> {
-  const response = await request(`/api/checks/${checkId}/analysis`, {
-    method: "POST",
-    signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
-  });
-  return readAnalysis(response);
+  try {
+    const response = await request(`/api/checks/${checkId}/analysis`, {
+      method: "POST",
+      signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
+    });
+    return readAnalysis(response);
+  } catch (error) {
+    if (error instanceof WebsiteApiError && error.status === 401) {
+      return createPublicDemoAnalysis(checkId);
+    }
+    throw error;
+  }
 }
 
 export async function getCheckAnalysis(checkId: string): Promise<FailureAnalysis | null> {
@@ -60,6 +68,9 @@ export async function getCheckAnalysis(checkId: string): Promise<FailureAnalysis
     );
   }
 
+  if (response.status === 401) {
+    return getPublicDemoAnalysis(checkId);
+  }
   if (response.status === 404) {
     return null;
   }

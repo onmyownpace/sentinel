@@ -1,9 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { WebsiteForm } from "@/components/WebsiteForm";
 import { WebsiteList } from "@/components/WebsiteList";
+import { getCurrentUser } from "@/lib/auth";
+import { getDeploymentMode } from "@/lib/deployment";
 import {
   deleteWebsite,
   listWebsites,
@@ -19,18 +22,26 @@ export function WebsiteRegistry() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [readOnlyDemo, setReadOnlyDemo] = useState(false);
   const requestId = useRef(0);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const current = ++requestId.current;
     setLoading(true);
     try {
-      const next = await listWebsites(signal);
+      const [next, mode, user] = await Promise.all([
+        listWebsites(signal),
+        getDeploymentMode(signal),
+        getCurrentUser(signal).catch(() => null),
+      ]);
       if (current !== requestId.current) {
         return;
       }
       setWebsites(next);
       setLoadError(null);
+      const demoOnly =
+        next.length > 0 && next.every((site) => site.name.trim().startsWith("[Demo]"));
+      setReadOnlyDemo(Boolean(mode.publicShell && !user) || (demoOnly && !user));
     } catch (error) {
       if (signal?.aborted || current !== requestId.current) {
         return;
@@ -81,7 +92,14 @@ export function WebsiteRegistry() {
 
   return (
     <div className="registry">
-      <WebsiteForm onCreated={onCreated} />
+      {readOnlyDemo ? (
+        <p className="banner ok" role="status">
+          Viewing the public demo workspace — no account needed.{" "}
+          <Link href="/demo">Back to the guided demo</Link>.
+        </p>
+      ) : (
+        <WebsiteForm onCreated={onCreated} />
+      )}
       <section className="card" aria-label="Registered websites" aria-busy={loading}>
         <h2>Registered websites{!loading && !loadError ? ` (${websites.length})` : ""}</h2>
         {notice ? (
@@ -110,13 +128,17 @@ export function WebsiteRegistry() {
         {!loading && !loadError ? (
           <WebsiteList
             websites={websites}
-            pendingDeleteId={pendingDeleteId}
+            pendingDeleteId={readOnlyDemo ? null : pendingDeleteId}
             deletingId={deletingId}
-            onAskDelete={(id) => {
-              setNotice(null);
-              setActionError(null);
-              setPendingDeleteId(id);
-            }}
+            onAskDelete={
+              readOnlyDemo
+                ? () => undefined
+                : (id) => {
+                    setNotice(null);
+                    setActionError(null);
+                    setPendingDeleteId(id);
+                  }
+            }
             onConfirmDelete={(id) => void onConfirmDelete(id)}
             onCancelDelete={() => setPendingDeleteId(null)}
             onWebsiteUpdated={(updated) => {
@@ -126,6 +148,7 @@ export function WebsiteRegistry() {
               );
               setNotice(`${updated.name} monitoring configuration saved.`);
             }}
+            hideActions={readOnlyDemo}
           />
         ) : null}
       </section>

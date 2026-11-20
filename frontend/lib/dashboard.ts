@@ -3,6 +3,7 @@
  */
 
 import { resolveApiUrl } from "@/lib/api";
+import { getPublicDemoDashboard } from "@/lib/publicDemo";
 import { WebsiteApiError } from "@/lib/websites";
 
 export type DashboardWebsite = {
@@ -80,7 +81,8 @@ export async function getDashboard(
     );
   }
   if (response.status === 401) {
-    throw new WebsiteApiError("Sign in required.", 401);
+    // Portfolio public shell: anonymous visitors read the seeded demo workspace.
+    return getPublicDemoDashboard(signal, statsWindow);
   }
   if (!response.ok) {
     throw new WebsiteApiError(`The API returned HTTP ${response.status}.`, response.status);

@@ -46,11 +46,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
       <section className="stack card" aria-label="Registration closed">
         <h2>Create account</h2>
         <p className="banner warn" role="status">
-          Public registration is closed on this deployment. Sign in with the portfolio demo
-          account, or run Sentinel locally to register freely.
-        </p>
-        <p className="hint tight">
-          <a href="/login">Sign in</a>
+          Public registration is closed on this deployment.{" "}
+          <a href="/demo">Try the demo</a> with no account, or run Sentinel locally to register
+          freely.
         </p>
       </section>
     );

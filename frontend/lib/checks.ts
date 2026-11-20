@@ -7,6 +7,7 @@
  */
 
 import { resolveApiUrl } from "@/lib/api";
+import { getPublicDemoCheck, listPublicDemoChecks } from "@/lib/publicDemo";
 import { WebsiteApiError } from "@/lib/websites";
 
 export type CheckOutcome = "success" | "failed";
@@ -54,17 +55,31 @@ export async function listWebsiteChecks(
   if (options?.limit != null) {
     params.set("limit", String(options.limit));
   }
-  const response = await request(`/api/websites/${websiteId}/checks?${params.toString()}`);
-  const body: unknown = await response.json();
-  if (!Array.isArray(body) || !body.every(isWebsiteCheck)) {
-    throw new WebsiteApiError("The check history was not in the expected shape.", response.status);
+  try {
+    const response = await request(`/api/websites/${websiteId}/checks?${params.toString()}`);
+    const body: unknown = await response.json();
+    if (!Array.isArray(body) || !body.every(isWebsiteCheck)) {
+      throw new WebsiteApiError("The check history was not in the expected shape.", response.status);
+    }
+    return body;
+  } catch (error) {
+    if (error instanceof WebsiteApiError && error.status === 401) {
+      return listPublicDemoChecks(websiteId);
+    }
+    throw error;
   }
-  return body;
 }
 
 export async function getCheck(checkId: string, signal?: AbortSignal): Promise<WebsiteCheck> {
-  const response = await request(`/api/checks/${checkId}`, { signal });
-  return readCheck(response);
+  try {
+    const response = await request(`/api/checks/${checkId}`, { signal });
+    return readCheck(response);
+  } catch (error) {
+    if (error instanceof WebsiteApiError && error.status === 401) {
+      return getPublicDemoCheck(checkId, signal);
+    }
+    throw error;
+  }
 }
 
 export async function fetchCheckScreenshot(
