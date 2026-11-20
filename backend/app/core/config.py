@@ -41,8 +41,11 @@ class Settings(BaseSettings):
     app_name: str = "Sentinel"
     app_version: str = "0.1.0"
     environment: str = "development"
-    # Public shell: $0 Render+Neon portfolio mode. Disables live Chromium,
-    # forces simulated AI, and closes open registration. Local default is off.
+    # Public shell: $0 Render+Neon portfolio mode. Disables live Chromium
+    # and closes open registration. Does not force analysis to simulated —
+    # signed-in workspace may use ANALYSIS_PROVIDER=openai (Together).
+    # Seeded demo/portfolio checks still use simulated analysis in routes.
+    # Local default is off.
     public_shell: bool = False
     # Explicit kill switch for Playwright execution. Public shell forces off
     # even if this is left true in a misconfigured env file.
@@ -208,9 +211,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def public_shell_safety(self) -> "Settings":
-        if self.public_shell and self.analysis_provider == "openai":
-            # Public shell never calls paid AI — keep config honest at boot.
-            object.__setattr__(self, "analysis_provider", "simulated")
+        # Public shell still disables browser + registration via properties.
+        # Analysis provider is left as configured so signed-in workspace can
+        # use Together/OpenAI-compatible keys on Render.
         # TOGETHER_API_KEY is a documented alias for the OpenAI-compatible key.
         if not (self.openai_api_key and self.openai_api_key.strip()):
             together = (self.together_api_key or "").strip()
@@ -267,8 +270,11 @@ class Settings(BaseSettings):
 
     @property
     def effective_analysis_provider(self) -> Literal["simulated", "openai"]:
-        if self.public_shell:
-            return "simulated"
+        """Provider for signed-in workspace analysis.
+
+        Public shell no longer overrides this. Seeded demo/portfolio rows are
+        forced to simulated in the analysis routes instead.
+        """
         return self.analysis_provider
 
     @property

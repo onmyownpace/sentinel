@@ -32,13 +32,18 @@ export function WebsiteList({
       {websites.map((website) => {
         const confirming = pendingDeleteId === website.id;
         const deleting = deletingId === website.id;
+        const isDemo = website.name.trim().startsWith("[Demo]");
         return (
           <li key={website.id} className="website">
             <div className="website-heading">
               <div>
                 <h3>
+                  {isDemo ? <span className="demo-chip">Demo</span> : null}{" "}
                   <Link href={`/websites/${website.id}`}>{website.name}</Link>
                 </h3>
+                {isDemo ? (
+                  <p className="meta">Sample portfolio data — not live monitoring</p>
+                ) : null}
                 <p className="meta">
                   <a href={website.base_url} target="_blank" rel="noreferrer">
                     {website.base_url}

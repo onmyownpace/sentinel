@@ -288,12 +288,17 @@ function WebsiteRow({
   site: DashboardWebsite;
   stats: DashboardWebsiteStats | null;
 }) {
+  const isDemo = site.name.trim().startsWith("[Demo]");
   return (
     <li className="website">
       <div>
         <h3>
+          {isDemo ? <span className="demo-chip">Demo</span> : null}{" "}
           <Link href={`/websites/${site.id}`}>{site.name}</Link>
         </h3>
+        {isDemo ? (
+          <p className="meta">Sample portfolio data — not live monitoring</p>
+        ) : null}
         <p className="meta">{site.base_url}</p>
         <p className="meta">Monitoring: {site.monitoring_enabled ? "enrolled" : "off"}</p>
         {stats ? (
@@ -324,10 +329,19 @@ function WebsiteRow({
 
 function CheckRow({ check }: { check: DashboardCheck }) {
   const failed = check.outcome !== "success";
+  const isDemo =
+    typeof check.error_message === "string" &&
+    check.error_message.includes("Demo result — not a live browser check");
   return (
     <li>
       <p>
         <span className={failed ? "bad" : "ok"}>{check.outcome}</span>
+        {isDemo ? (
+          <>
+            {" · "}
+            <span className="demo-chip">Demo</span>
+          </>
+        ) : null}
         {" · "}
         <Link href={`/websites/${check.website_id}`}>{check.website_name}</Link>
         {" · "}

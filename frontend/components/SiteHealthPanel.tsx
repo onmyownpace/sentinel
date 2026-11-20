@@ -80,6 +80,7 @@ export function SiteHealthPanel({ websiteId }: SiteHealthPanelProps) {
 
   const failing = Boolean(state?.still_failing || state?.status === "failing");
   const recovered = Boolean(state?.recovered || state?.status === "healthy");
+  const isDemo = website.name.trim().startsWith("[Demo]");
 
   return (
     <div className="registry site-health">
@@ -94,7 +95,12 @@ export function SiteHealthPanel({ websiteId }: SiteHealthPanelProps) {
       <section className="card site-summary" aria-label="Site summary">
         <div className="site-summary-heading">
           <div>
-            <h2>{website.name}</h2>
+            <h2>
+              {isDemo ? <span className="demo-chip">Demo</span> : null} {website.name}
+            </h2>
+            {isDemo ? (
+              <p className="meta">Sample portfolio data — not live monitoring</p>
+            ) : null}
             <p className="meta">
               <a href={website.base_url} target="_blank" rel="noreferrer">
                 {website.base_url}
