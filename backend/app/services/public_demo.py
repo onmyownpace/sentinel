@@ -22,6 +22,9 @@ DEMO_SITE_URL = "https://example.com"
 DEMO_MARKER = "Demo result — not a live browser check. Live Playwright runs require a local or full deployment."
 DEMO_NAME_PREFIX = "[Demo]"
 
+# Imported lazily-shaped constant kept here so demo routes share one matcher.
+_PROBE_PREFIX = "Lightweight HTTP probe"
+
 
 def is_demo_website_name(name: str | None) -> bool:
     """True for seeded portfolio sample sites (not the user's live product)."""
@@ -29,10 +32,12 @@ def is_demo_website_name(name: str | None) -> bool:
 
 
 def is_demo_check_result(error_message: str | None) -> bool:
-    """True when the check row is sample/portfolio data, not a live browser run."""
+    """True for seeded demo rows or lightweight public HTTP probe rows."""
     if not error_message:
         return False
-    return error_message.startswith("Demo result — not a live browser check")
+    return error_message.startswith(
+        "Demo result — not a live browser check"
+    ) or error_message.startswith(_PROBE_PREFIX)
 
 
 async def get_seeded_demo_website(session: AsyncSession) -> Website | None:

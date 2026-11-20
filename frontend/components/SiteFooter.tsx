@@ -1,14 +1,8 @@
-import Link from "next/link";
-
-/** Secondary links only — diagnostics stay out of primary product nav. */
+/** Secondary chrome only — no Status/Diagnostics links for portfolio visitors. */
 export function SiteFooter() {
   return (
     <footer className="site-footer">
-      <p className="hint tight">
-        <Link href="/status">Diagnostics</Link>
-        {" · "}
-        API / database status for operators
-      </p>
+      <p className="hint tight">Sentinel · website monitoring</p>
     </footer>
   );
 }

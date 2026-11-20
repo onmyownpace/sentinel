@@ -92,6 +92,38 @@ export async function createPublicDemoAnalysis(checkId: string): Promise<Failure
   return body;
 }
 
+const PROBE_TIMEOUT_MS = 40_000;
+
+/** Anonymous lightweight HTTP probe for any public http(s) URL. */
+export async function runPublicProbe(url: string): Promise<WebsiteCheck> {
+  const response = await request("/api/public/demo/probe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, authorized: true }),
+    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+  });
+  const body: unknown = await response.json();
+  if (!isWebsiteCheck(body)) {
+    throw new WebsiteApiError("The probe result was not in the expected shape.", response.status);
+  }
+  return body;
+}
+
+/** Lightweight probe of the seeded demo website's base URL. */
+export async function runPublicDemoWebsiteCheck(websiteId: string): Promise<WebsiteCheck> {
+  const response = await request(`/api/public/demo/websites/${websiteId}/checks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ authorized: true }),
+    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+  });
+  const body: unknown = await response.json();
+  if (!isWebsiteCheck(body)) {
+    throw new WebsiteApiError("The probe result was not in the expected shape.", response.status);
+  }
+  return body;
+}
+
 export async function getPublicDemoAnalysis(checkId: string): Promise<FailureAnalysis | null> {
   const apiUrl = resolveApiUrl();
   let response: Response;

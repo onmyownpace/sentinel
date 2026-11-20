@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { CheckResult } from "@/components/CheckResult";
 import type { FailureAnalysis } from "@/lib/analysis";
+import type { WebsiteCheck } from "@/lib/checks";
 import {
   createPublicDemoAnalysis,
   getPublicDemo,
+  runPublicProbe,
   type PublicDemoSnapshot,
 } from "@/lib/publicDemo";
 import { WebsiteApiError } from "@/lib/websites";
@@ -17,6 +20,11 @@ export function DemoExperience() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  const [probeUrl, setProbeUrl] = useState("https://example.com");
+  const [authorized, setAuthorized] = useState(false);
+  const [probing, setProbing] = useState(false);
+  const [probeError, setProbeError] = useState<string | null>(null);
+  const [probeResult, setProbeResult] = useState<WebsiteCheck | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -58,6 +66,23 @@ export function DemoExperience() {
     }
   }
 
+  async function onProbe() {
+    setProbing(true);
+    setProbeError(null);
+    try {
+      const result = await runPublicProbe(probeUrl.trim());
+      setProbeResult(result);
+      setAuthorized(false);
+    } catch (err) {
+      setProbeResult(null);
+      setProbeError(
+        err instanceof WebsiteApiError ? err.message : "The lightweight check could not be started.",
+      );
+    } finally {
+      setProbing(false);
+    }
+  }
+
   if (loading) {
     return <p className="hint">Loading demo…</p>;
   }
@@ -83,6 +108,52 @@ export function DemoExperience() {
 
   return (
     <div className="demo-experience">
+      <section className="card demo-site-card" aria-label="Test a site">
+        <h2>Test a site</h2>
+        <p className="hint tight">
+          Enter any public http(s) URL for a <strong>lightweight HTTP check</strong> — real status
+          code and latency, no login, no Chromium. Optional analysis is available on failures.
+        </p>
+        <label htmlFor="probe-url">
+          URL
+          <input
+            id="probe-url"
+            type="url"
+            name="probe-url"
+            value={probeUrl}
+            disabled={probing}
+            placeholder="https://example.com"
+            spellCheck={false}
+            onChange={(event) => setProbeUrl(event.target.value)}
+          />
+        </label>
+        <label className="acknowledge">
+          <input
+            type="checkbox"
+            checked={authorized}
+            disabled={probing}
+            onChange={(event) => setAuthorized(event.target.checked)}
+          />
+          I am authorized to test this website.
+        </label>
+        <div className="actions">
+          <button
+            type="button"
+            className="primary"
+            disabled={probing || !authorized || probeUrl.trim().length < 8}
+            onClick={() => void onProbe()}
+          >
+            {probing ? "Checking…" : "Run lightweight check"}
+          </button>
+        </div>
+        {probeError ? (
+          <p className="banner bad" role="alert">
+            {probeError}
+          </p>
+        ) : null}
+        {probeResult ? <CheckResult check={probeResult} disabled={probing} /> : null}
+      </section>
+
       <section className="card demo-site-card" aria-label="Demo site">
         <div className="site-summary-heading">
           <div>
@@ -97,7 +168,8 @@ export function DemoExperience() {
           </div>
         </div>
         <p className="next-action">
-          Next: inspect the failed check below, then run <strong>Analyze failure</strong>.
+          Next: inspect the seeded failure below, then run <strong>Analyze failure</strong> — or use
+          the URL form above for a live lightweight check.
         </p>
         <p className="hint tight">
           Prefer the full console?{" "}
@@ -108,7 +180,7 @@ export function DemoExperience() {
       </section>
 
       <section className="card" aria-label="Check history">
-        <h2>Check history</h2>
+        <h2>Seeded check history</h2>
         <ul className="demo-check-list">
           {failed ? (
             <li className="demo-check-row fail">

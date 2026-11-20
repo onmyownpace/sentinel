@@ -21,6 +21,9 @@ export function CheckResult({
   const isDemo =
     typeof check.error_message === "string" &&
     check.error_message.includes("Demo result — not a live browser check");
+  const isProbe =
+    typeof check.error_message === "string" &&
+    check.error_message.includes("Lightweight HTTP probe");
 
   return (
     <div className="check-result">
@@ -28,6 +31,12 @@ export function CheckResult({
         <p className="banner warn tight" role="status">
           <span className="demo-chip">Demo</span> Sample result — not a live browser check or
           live monitoring product
+        </p>
+      ) : null}
+      {isProbe ? (
+        <p className="banner warn tight" role="status">
+          <span className="demo-chip">Lightweight</span> HTTP probe — status/latency/title only,
+          not full browser automation
         </p>
       ) : null}
       <p className={outcomeClass}>
@@ -50,7 +59,16 @@ export function CheckResult({
           </a>
         </p>
       ) : null}
-      {check.error_message ? <p className="meta">{check.error_message}</p> : null}
+      {check.error_message && !isDemo && !(isProbe && check.outcome === "success") ? (
+        <p className="meta">
+          {isProbe
+            ? check.error_message.replace(
+                /^Lightweight HTTP probe — not a full browser check\.\s*(No Chromium, console capture, or screenshots\.\s*)?/,
+                "",
+              )
+            : check.error_message}
+        </p>
+      ) : null}
       {check.console_errors.length > 0 ? (
         <div>
           <p className="meta">Console errors</p>

@@ -10,6 +10,7 @@ import {
   type WebsiteCheck,
 } from "@/lib/checks";
 import { getDeploymentMode } from "@/lib/deployment";
+import { runPublicDemoWebsiteCheck } from "@/lib/publicDemo";
 import { WebsiteApiError } from "@/lib/websites";
 
 type WebsiteChecksProps = {
@@ -29,11 +30,13 @@ export function WebsiteChecks({ websiteId, disabled }: WebsiteChecksProps) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [liveBrowser, setLiveBrowser] = useState(true);
+  const [publicShell, setPublicShell] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
     getDeploymentMode(controller.signal).then((mode) => {
       setLiveBrowser(mode.liveBrowserEnabled);
+      setPublicShell(mode.publicShell);
     });
     return () => controller.abort();
   }, []);
@@ -42,7 +45,9 @@ export function WebsiteChecks({ websiteId, disabled }: WebsiteChecksProps) {
     setRunning(true);
     setError(null);
     try {
-      const result = await runWebsiteCheck(websiteId);
+      const result = liveBrowser
+        ? await runWebsiteCheck(websiteId)
+        : await runLightweight(websiteId, publicShell);
       setLatest(result);
       setConfirming(false);
       setAuthorized(false);
@@ -86,20 +91,23 @@ export function WebsiteChecks({ websiteId, disabled }: WebsiteChecksProps) {
     }
   }
 
+  const runLabel = liveBrowser ? "Run check" : "Run lightweight check";
+
   return (
     <div className="check-panel" aria-busy={running || historyLoading}>
       {!liveBrowser ? (
         <p className="banner warn" role="status">
-          Live browser checks are off in the public shell. Open check history to explore{" "}
-          <strong>demo results</strong> (clearly labelled). Run Playwright locally or on a full
-          deployment for real checks.
+          Live browser checks are off in the public shell.{" "}
+          <strong>Run lightweight check</strong> performs a real HTTP GET (status, latency, title) —
+          not full Chromium automation. Seeded demo history stays available below.
         </p>
       ) : null}
-      {liveBrowser && confirming ? (
+      {confirming ? (
         <div>
           <p className="hint tight">
-            Sentinel will open this URL in Chromium on this machine. Run a check only if you are
-            allowed to test the site.
+            {liveBrowser
+              ? "Sentinel will open this URL in Chromium on this machine. Run a check only if you are allowed to test the site."
+              : "Sentinel will send a lightweight HTTP GET to this site’s public URL and record the status code. Confirm you are allowed to test it."}
           </p>
           <label className="acknowledge">
             <input
@@ -117,7 +125,7 @@ export function WebsiteChecks({ websiteId, disabled }: WebsiteChecksProps) {
               disabled={!authorized || running || disabled}
               onClick={() => void onRun()}
             >
-              {running ? "Checking…" : "Run check"}
+              {running ? "Checking…" : runLabel}
             </button>
             <button
               type="button"
@@ -131,24 +139,20 @@ export function WebsiteChecks({ websiteId, disabled }: WebsiteChecksProps) {
             </button>
           </div>
         </div>
-      ) : null}
-      {liveBrowser && !confirming ? (
+      ) : (
         <div className="actions">
           <button type="button" disabled={disabled || running} onClick={() => setConfirming(true)}>
-            {running ? "Checking…" : "Run check"}
+            {running ? "Checking…" : runLabel}
           </button>
           <button type="button" disabled={disabled || running} onClick={() => void onToggleHistory()}>
-            {historyOpen ? "Hide history" : "Check history"}
+            {historyOpen
+              ? "Hide history"
+              : liveBrowser
+                ? "Check history"
+                : "Check history (includes demo results)"}
           </button>
         </div>
-      ) : null}
-      {!liveBrowser ? (
-        <div className="actions">
-          <button type="button" disabled={disabled || running} onClick={() => void onToggleHistory()}>
-            {historyOpen ? "Hide history" : "Check history (includes demo results)"}
-          </button>
-        </div>
-      ) : null}
+      )}
 
       {error ? (
         <p className="banner bad" role="alert">
@@ -198,4 +202,18 @@ export function WebsiteChecks({ websiteId, disabled }: WebsiteChecksProps) {
       ) : null}
     </div>
   );
+}
+
+async function runLightweight(websiteId: string, publicShell: boolean): Promise<WebsiteCheck> {
+  if (publicShell) {
+    try {
+      return await runPublicDemoWebsiteCheck(websiteId);
+    } catch (error) {
+      // Signed-in workspace sites are not on the public demo route — fall through.
+      if (!(error instanceof WebsiteApiError) || error.status !== 404) {
+        throw error;
+      }
+    }
+  }
+  return runWebsiteCheck(websiteId);
 }
