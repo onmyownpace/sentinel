@@ -27,6 +27,8 @@ def test_liveness_does_not_depend_on_the_database(client: TestClient) -> None:
         "public_shell": False,
         "live_browser_enabled": True,
         "analysis_provider": "simulated",
+        "analysis_model": "simulated-local",
+        "analysis_base_host": None,
         "registration_open": True,
     }
 

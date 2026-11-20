@@ -162,7 +162,16 @@ class OpenAIAnalysisProvider:
     base_url: str | None = None
 
     async def analyze(self, evidence: dict[str, object]) -> FailureAnalysisResult:
+        from urllib.parse import urlparse
+
         from openai import APIError, APITimeoutError, AsyncOpenAI, LengthFinishReasonError
+
+        # Hostname only — never log the API key or full URL with credentials.
+        host = "default"
+        if self.base_url:
+            parsed = urlparse(self.base_url)
+            host = (parsed.hostname or "custom").lower()
+        logger.info("OpenAI-compatible analysis request host=%s model=%s", host, self.model)
 
         client = AsyncOpenAI(api_key=self.api_key, timeout=self.timeout_seconds, base_url=self.base_url)
         user_content = (
@@ -189,10 +198,10 @@ class OpenAIAnalysisProvider:
         except APITimeoutError as exc:
             raise AnalysisProviderError("The analysis provider timed out.") from exc
         except APIError as exc:
-            logger.warning("OpenAI analysis failed (%s)", exc.__class__.__name__)
+            logger.warning("OpenAI-compatible analysis failed host=%s (%s)", host, exc.__class__.__name__)
             raise AnalysisProviderError("The analysis provider could not complete the request.") from exc
         except Exception as exc:
-            logger.warning("OpenAI analysis failed (%s)", exc.__class__.__name__)
+            logger.warning("OpenAI-compatible analysis failed host=%s (%s)", host, exc.__class__.__name__)
             raise AnalysisProviderError("The analysis provider could not complete the request.") from exc
 
         message = completion.choices[0].message

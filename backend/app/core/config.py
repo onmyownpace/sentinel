@@ -10,6 +10,7 @@ directory the process was started from.
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 from typing import Literal
 
@@ -19,6 +20,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # backend/app/core/config.py -> repository root is three parents up.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ENV_FILE = _REPO_ROOT / ".env"
+
+# Stock OpenAI default. When OPENAI_BASE_URL points at Together and the model
+# is still this value, Settings substitutes DEFAULT_TOGETHER_MODEL.
+DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+# Sensible Together chat model for the OpenAI-compatible /v1 endpoint.
+DEFAULT_TOGETHER_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+TOGETHER_API_HOST = "api.together.ai"
 
 
 class Settings(BaseSettings):
@@ -65,13 +73,18 @@ class Settings(BaseSettings):
     # BROW-2: request-bound journey budget (seconds) for the whole mini-journey.
     journey_budget_seconds: float = 45
     # Failure analysis provider. `simulated` is the development default and
-    # never calls an external AI API. `openai` needs OPENAI_API_KEY.
+    # never calls an external AI API. `openai` uses the OpenAI-compatible client
+    # (OpenAI itself or Together via OPENAI_BASE_URL). DB/provider label stays
+    # `openai` when using Together so check constraints stay valid.
     analysis_provider: Literal["simulated", "openai"] = "simulated"
     openai_api_key: str | None = None
+    # Optional OpenAI-compatible base URL (e.g. https://api.together.ai/v1).
     openai_base_url: str | None = None
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = DEFAULT_OPENAI_MODEL
     openai_timeout_seconds: float = 30
     openai_max_output_tokens: int = 1200
+    # Fallback alias: used only when OPENAI_API_KEY is empty. Never logged.
+    together_api_key: str | None = None
     # Shared secret for n8n scheduled checks. Empty means the scheduled-check
     # route refuses work. This is a machine acknowledgement, not user auth.
     schedule_check_token: str | None = None
@@ -157,6 +170,16 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_MODEL must not be blank")
         return cleaned
 
+    @field_validator("openai_base_url", mode="before")
+    @classmethod
+    def openai_base_url_blank_to_none(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return value
+
     @field_validator("session_ttl_days")
     @classmethod
     def session_ttl_must_be_bounded(cls, value: int) -> int:
@@ -188,6 +211,14 @@ class Settings(BaseSettings):
         if self.public_shell and self.analysis_provider == "openai":
             # Public shell never calls paid AI — keep config honest at boot.
             object.__setattr__(self, "analysis_provider", "simulated")
+        # TOGETHER_API_KEY is a documented alias for the OpenAI-compatible key.
+        if not (self.openai_api_key and self.openai_api_key.strip()):
+            together = (self.together_api_key or "").strip()
+            if together:
+                object.__setattr__(self, "openai_api_key", together)
+        # Together endpoint + unset/stock OpenAI model → Together-hosted default.
+        if self.is_together_endpoint and self.openai_model == DEFAULT_OPENAI_MODEL:
+            object.__setattr__(self, "openai_model", DEFAULT_TOGETHER_MODEL)
         if self.session_cookie_samesite == "none" and self.environment.lower() != "production":
             # Browsers require Secure with SameSite=None; production sets Secure.
             pass
@@ -218,10 +249,34 @@ class Settings(BaseSettings):
         return self.public_shell
 
     @property
+    def analysis_base_host(self) -> str | None:
+        """Hostname of the OpenAI-compatible endpoint, or None for the SDK default.
+
+        Never includes credentials. Used in health/status and startup logs so a
+        Together base URL is visible without printing keys.
+        """
+        if not self.openai_base_url:
+            return None
+        parsed = urlparse(self.openai_base_url)
+        host = (parsed.hostname or "").strip().lower()
+        return host or None
+
+    @property
+    def is_together_endpoint(self) -> bool:
+        return self.analysis_base_host == TOGETHER_API_HOST
+
+    @property
     def effective_analysis_provider(self) -> Literal["simulated", "openai"]:
         if self.public_shell:
             return "simulated"
         return self.analysis_provider
+
+    @property
+    def effective_analysis_model(self) -> str:
+        """Model label for health/UI. Simulated never exposes a live model id."""
+        if self.effective_analysis_provider == "simulated":
+            return "simulated-local"
+        return self.openai_model
 
 
 @lru_cache

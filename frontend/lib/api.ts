@@ -18,6 +18,9 @@ export type HealthBody = {
   public_shell?: boolean;
   live_browser_enabled?: boolean;
   analysis_provider?: string;
+  analysis_model?: string;
+  /** Hostname only (e.g. api.together.ai). Never a secret. */
+  analysis_base_host?: string | null;
   registration_open?: boolean;
 };
 

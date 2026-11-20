@@ -103,8 +103,9 @@ function AnalysisResult({ analysis }: { analysis: Analysis }) {
         </p>
       )}
       <p className="meta">
-        Provider: {analysis.provider} · Severity: {analysis.severity} · Model: {analysis.model_name}{" "}
-        · {formatTimestamp(analysis.created_at)}
+        Provider: {analysis.provider}
+        {analysis.provider === "openai" ? " (OpenAI-compatible)" : ""} · Severity:{" "}
+        {analysis.severity} · Model: {analysis.model_name} · {formatTimestamp(analysis.created_at)}
       </p>
       <p>{analysis.summary}</p>
       <section>

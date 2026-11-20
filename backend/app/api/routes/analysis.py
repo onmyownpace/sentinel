@@ -36,8 +36,9 @@ router = APIRouter(tags=["analysis"])
 _DATABASE_ERRORS = (SQLAlchemyError, OSError, TimeoutError, ConnectionError)
 
 _OPENAI_UNCONFIGURED = (
-    "AI failure analysis is set to openai but OPENAI_API_KEY is missing. "
-    "Set the key, or set ANALYSIS_PROVIDER=simulated, then restart the API."
+    "AI failure analysis is set to openai but no API key is configured. "
+    "Set OPENAI_API_KEY (or TOGETHER_API_KEY as a fallback alias), "
+    "or set ANALYSIS_PROVIDER=simulated, then restart the API."
 )
 
 

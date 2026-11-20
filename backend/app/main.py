@@ -55,13 +55,15 @@ def create_app() -> FastAPI:
         app.state.engine = engine
         app.state.session_factory = create_session_factory(engine)
         logger.info(
-            "Starting %s %s (%s) public_shell=%s live_browser=%s analysis=%s",
+            "Starting %s %s (%s) public_shell=%s live_browser=%s analysis=%s model=%s host=%s",
             settings.app_name,
             settings.app_version,
             settings.environment,
             settings.public_shell,
             settings.browser_execution_allowed,
             settings.effective_analysis_provider,
+            settings.effective_analysis_model,
+            settings.analysis_base_host or "default",
         )
         await ensure_seed_user(app.state.session_factory, settings)
         await ensure_public_shell_demo(app.state.session_factory, settings)
