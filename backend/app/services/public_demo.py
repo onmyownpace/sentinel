@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -32,6 +33,36 @@ def is_demo_check_result(error_message: str | None) -> bool:
     if not error_message:
         return False
     return error_message.startswith("Demo result — not a live browser check")
+
+
+async def get_seeded_demo_website(session: AsyncSession) -> Website | None:
+    """Return the seeded portfolio demo site, or None when it is not present."""
+    result = await session.execute(
+        select(Website)
+        .where(Website.name == DEMO_SITE_NAME)
+        .order_by(Website.created_at.asc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def require_demo_website(session: AsyncSession, website_id: UUID) -> Website:
+    """Return a website only when it is the seeded portfolio demo site."""
+    website = await session.get(Website, website_id)
+    if website is None or not is_demo_website_name(website.name):
+        raise LookupError("demo website not found")
+    return website
+
+
+async def require_demo_check(session: AsyncSession, check_id: UUID) -> WebsiteCheck:
+    """Return a check only when it belongs to the seeded demo site and is marked demo."""
+    check = await session.get(WebsiteCheck, check_id)
+    if check is None or not is_demo_check_result(check.error_message):
+        raise LookupError("demo check not found")
+    website = await session.get(Website, check.website_id)
+    if website is None or not is_demo_website_name(website.name):
+        raise LookupError("demo check not found")
+    return check
 
 
 async def ensure_public_shell_demo(

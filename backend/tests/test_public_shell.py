@@ -244,6 +244,90 @@ def test_public_shell_workspace_analysis_uses_configured_provider(
     assert body["model_name"] == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
 
 
+def test_anonymous_can_load_demo_failure_and_analysis(
+    public_shell_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Strangers load the seeded failure + simulated analysis with no cookies."""
+
+    def boom_openai(*_args, **_kwargs):
+        raise AssertionError("AsyncOpenAI must not be constructed for public demo analysis")
+
+    import openai
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", boom_openai)
+
+    # No login — clear any cookies the client may hold.
+    public_shell_client.cookies.clear()
+
+    snapshot = public_shell_client.get("/api/public/demo")
+    assert snapshot.status_code == 200, snapshot.text
+    body = snapshot.json()
+    assert body["website"]["name"].startswith("[Demo]")
+    failed_id = body["failed_check_id"]
+    assert failed_id, "public demo should expose a failed check"
+    assert any(row["id"] == failed_id and row["outcome"] == "failed" for row in body["checks"])
+
+    check = public_shell_client.get(f"/api/public/demo/checks/{failed_id}")
+    assert check.status_code == 200, check.text
+    assert check.json()["http_status"] == 503
+
+    analysis = public_shell_client.post(f"/api/public/demo/checks/{failed_id}/analysis")
+    assert analysis.status_code in {200, 201}, analysis.text
+    payload = analysis.json()
+    assert payload["provider"] == "simulated"
+    assert payload["model_name"] == "simulated-local"
+    assert payload["check_id"] == failed_id
+
+    dashboard = public_shell_client.get("/api/public/demo/dashboard")
+    assert dashboard.status_code == 200, dashboard.text
+    dash = dashboard.json()
+    assert len(dash["websites"]) == 1
+    assert dash["websites"][0]["name"].startswith("[Demo]")
+    assert dash["health"]["recent_failure_count"] >= 1
+
+
+def test_anonymous_public_demo_hides_non_demo_data(
+    public_shell_client: TestClient,
+) -> None:
+    """Private workspace rows must not leak through the anonymous demo API."""
+    login = public_shell_client.post(
+        "/api/auth/login",
+        json={"email": "demo@sentinel.local", "password": "demo-password-change-me"},
+    )
+    assert login.status_code == 200, login.text
+    created = public_shell_client.post(
+        "/api/websites",
+        json={"name": "Secret private site", "base_url": f"https://example.com/{uuid4().hex}"},
+    )
+    assert created.status_code == 201, created.text
+    private_id = created.json()["id"]
+
+    public_shell_client.cookies.clear()
+
+    denied_site = public_shell_client.get(f"/api/public/demo/websites/{private_id}")
+    assert denied_site.status_code == 404
+
+    denied_list = public_shell_client.get(f"/api/public/demo/websites/{private_id}/checks")
+    assert denied_list.status_code == 404
+
+    # Authenticated list still includes the private site; anonymous demo snapshot does not.
+    login = public_shell_client.post(
+        "/api/auth/login",
+        json={"email": "demo@sentinel.local", "password": "demo-password-change-me"},
+    )
+    assert login.status_code == 200
+    owned = public_shell_client.get("/api/websites")
+    assert owned.status_code == 200
+    assert any(site["id"] == private_id for site in owned.json())
+
+    public_shell_client.cookies.clear()
+    demo = public_shell_client.get("/api/public/demo")
+    assert demo.status_code == 200
+    assert demo.json()["website"]["id"] != private_id
+    assert "Secret private" not in demo.text
+
+
 def test_registration_blocked(public_shell_client: TestClient) -> None:
     response = public_shell_client.post(
         "/api/auth/register",

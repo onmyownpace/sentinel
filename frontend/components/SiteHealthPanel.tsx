@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { IncidentDraftPanel } from "@/components/IncidentDraftPanel";
 import { JourneyPanel } from "@/components/JourneyPanel";
@@ -27,7 +26,6 @@ const TABS: { id: HealthTab; label: string }[] = [
 ];
 
 export function SiteHealthPanel({ websiteId }: SiteHealthPanelProps) {
-  const router = useRouter();
   const [website, setWebsite] = useState<Website | null>(null);
   const [state, setState] = useState<MonitoringState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,10 +46,6 @@ export function SiteHealthPanel({ websiteId }: SiteHealthPanelProps) {
         if (controller.signal.aborted) {
           return;
         }
-        if (err instanceof WebsiteApiError && err.status === 401) {
-          router.replace("/login");
-          return;
-        }
         if (err instanceof WebsiteApiError && err.status === 404) {
           setError("That website was not found.");
           return;
@@ -59,7 +53,7 @@ export function SiteHealthPanel({ websiteId }: SiteHealthPanelProps) {
         setError(err instanceof Error ? err.message : "Could not load this site.");
       });
     return () => controller.abort();
-  }, [websiteId, router]);
+  }, [websiteId]);
 
   if (error) {
     return (

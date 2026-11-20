@@ -6,6 +6,7 @@
  */
 
 import { resolveApiUrl } from "@/lib/api";
+import { getPublicDemo, getPublicDemoWebsite } from "@/lib/publicDemo";
 
 export type Website = {
   id: string;
@@ -93,21 +94,47 @@ function validateBaseUrl(value: string): string | null {
 }
 
 export async function listWebsites(signal?: AbortSignal): Promise<Website[]> {
-  const response = await request("/api/websites", { signal });
-  const body: unknown = await response.json();
-  if (!Array.isArray(body) || !body.every(isWebsite)) {
-    throw new WebsiteApiError("The website list was not in the expected shape.", response.status);
+  try {
+    const response = await request("/api/websites", { signal });
+    const body: unknown = await response.json();
+    if (!Array.isArray(body) || !body.every(isWebsite)) {
+      throw new WebsiteApiError("The website list was not in the expected shape.", response.status);
+    }
+    return body;
+  } catch (error) {
+    if (error instanceof WebsiteApiError && error.status === 401) {
+      const demo = await getPublicDemo(signal);
+      return [normalizeWebsite(demo.website)];
+    }
+    throw error;
   }
-  return body;
 }
 
 export async function getWebsite(id: string, signal?: AbortSignal): Promise<Website> {
-  const response = await request(`/api/websites/${id}`, { signal });
-  const body: unknown = await response.json();
-  if (!isWebsite(body)) {
-    throw new WebsiteApiError("The website was not in the expected shape.", response.status);
+  try {
+    const response = await request(`/api/websites/${id}`, { signal });
+    const body: unknown = await response.json();
+    if (!isWebsite(body)) {
+      throw new WebsiteApiError("The website was not in the expected shape.", response.status);
+    }
+    return body;
+  } catch (error) {
+    if (error instanceof WebsiteApiError && error.status === 401) {
+      return normalizeWebsite(await getPublicDemoWebsite(id, signal));
+    }
+    throw error;
   }
-  return body;
+}
+
+function normalizeWebsite(website: Website): Website {
+  return {
+    ...website,
+    latency_threshold_ms: website.latency_threshold_ms ?? null,
+    failure_threshold_count: website.failure_threshold_count ?? null,
+    notify_on_fail: website.notify_on_fail ?? true,
+    notify_on_recover: website.notify_on_recover ?? true,
+    notify_on_latency: website.notify_on_latency ?? true,
+  };
 }
 
 export async function createWebsite(input: WebsiteInput): Promise<Website> {
@@ -192,8 +219,8 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
   }
 
   if (response.status === 401) {
-    throw new WebsiteApiError("Sign in required. Open Login, then return here.", 401, {
-      form: "Sign in required. Open Login, then return here.",
+    throw new WebsiteApiError("Sign in required.", 401, {
+      form: "Sign in required.",
     });
   }
 

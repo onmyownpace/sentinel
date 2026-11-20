@@ -13,6 +13,8 @@ type WebsiteListProps = {
   onCancelDelete: () => void;
   /** Kept for registry compatibility; site tools live on Site health. */
   onWebsiteUpdated?: (website: Website) => void;
+  /** Public portfolio demo: list only, no delete. */
+  hideActions?: boolean;
 };
 
 export function WebsiteList({
@@ -22,6 +24,7 @@ export function WebsiteList({
   onAskDelete,
   onConfirmDelete,
   onCancelDelete,
+  hideActions = false,
 }: WebsiteListProps) {
   if (websites.length === 0) {
     return <p className="hint tight">No websites registered yet.</p>;
@@ -59,7 +62,7 @@ export function WebsiteList({
                   {" — overview, investigate, automation"}
                 </p>
               </div>
-              {confirming ? (
+              {hideActions ? null : confirming ? (
                 <div
                   className="confirm"
                   role="group"

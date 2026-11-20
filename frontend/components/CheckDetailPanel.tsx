@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { CheckResult } from "@/components/CheckResult";
 import { ScreenshotPlaceholder } from "@/components/ScreenshotPlaceholder";
@@ -14,7 +13,6 @@ type CheckDetailPanelProps = {
 };
 
 export function CheckDetailPanel({ checkId }: CheckDetailPanelProps) {
-  const router = useRouter();
   const [check, setCheck] = useState<WebsiteCheck | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,10 +25,6 @@ export function CheckDetailPanel({ checkId }: CheckDetailPanelProps) {
         if (controller.signal.aborted) {
           return;
         }
-        if (err instanceof WebsiteApiError && err.status === 401) {
-          router.replace("/login");
-          return;
-        }
         if (err instanceof WebsiteApiError && err.status === 404) {
           setError("That check was not found.");
           return;
@@ -38,7 +32,7 @@ export function CheckDetailPanel({ checkId }: CheckDetailPanelProps) {
         setError(err instanceof Error ? err.message : "Could not load this check.");
       });
     return () => controller.abort();
-  }, [checkId, router]);
+  }, [checkId]);
 
   if (error) {
     return (

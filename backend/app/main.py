@@ -21,6 +21,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.journeys import router as journey_router
 from app.api.routes.incident_drafts import router as incident_draft_router
 from app.api.routes.pattern_hints import router as pattern_hint_router
+from app.api.routes.public_demo import router as public_demo_router
 from app.api.routes.scenarios import router as scenario_router
 from app.api.routes.stats import router as stats_router
 from app.api.routes.websites import router as website_router
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(public_demo_router)
     app.include_router(dashboard_router)
     app.include_router(website_router)
     app.include_router(check_router)

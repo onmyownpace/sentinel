@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import {
   DashboardCheck,
@@ -13,10 +12,8 @@ import {
   DashboardWindow,
   getDashboard,
 } from "@/lib/dashboard";
-import { WebsiteApiError } from "@/lib/websites";
 
 export function DashboardPanel() {
-  const router = useRouter();
   const [windowName, setWindowName] = useState<DashboardWindow>("7d");
   const [data, setData] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,10 +29,6 @@ export function DashboardPanel() {
         if (controller.signal.aborted) {
           return;
         }
-        if (err instanceof WebsiteApiError && err.status === 401) {
-          router.replace("/login");
-          return;
-        }
         setError(err instanceof Error ? err.message : "Could not load the dashboard.");
       })
       .finally(() => {
@@ -44,7 +37,7 @@ export function DashboardPanel() {
         }
       });
     return () => controller.abort();
-  }, [router, windowName]);
+  }, [windowName]);
 
   const statsById = useMemo(() => {
     const map = new Map<string, DashboardWebsiteStats>();
