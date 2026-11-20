@@ -15,12 +15,12 @@ export async function generateMetadata({ params }: CheckPageProps) {
 export default async function CheckDetailPage({ params }: CheckPageProps) {
   const { checkId } = await params;
   return (
-    <main className="wide">
-      <h1>Check detail</h1>
-      <p>
-        Full stored observation, on-demand failure analysis when the check failed, and the optional
-        viewport screenshot when capture succeeded.
-      </p>
+    <main className="wide workspace">
+      <header className="workspace-hero">
+        <p className="workspace-kicker">Check detail</p>
+        <h1>Observation</h1>
+        <p>Stored check result, failure analysis when needed, and screenshot when captured.</p>
+      </header>
       <CheckDetailPanel checkId={checkId} />
     </main>
   );

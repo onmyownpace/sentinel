@@ -65,6 +65,18 @@ export default async function HomePage() {
               <dd>{snapshot.liveness.analysis_provider ?? "simulated"}</dd>
             </div>
             <div>
+              <dt>Analysis model</dt>
+              <dd>{snapshot.liveness.analysis_model ?? "simulated-local"}</dd>
+            </div>
+            <div>
+              <dt>Analysis endpoint host</dt>
+              <dd>
+                {snapshot.liveness.analysis_provider === "openai"
+                  ? snapshot.liveness.analysis_base_host ?? "default (api.openai.com)"
+                  : "n/a (simulated)"}
+              </dd>
+            </div>
+            <div>
               <dt>API address</dt>
               <dd>{snapshot.apiUrl}</dd>
             </div>

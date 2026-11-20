@@ -89,6 +89,7 @@ def get_resolved_incident_provider(request: Request) -> ResolvedIncidentDraftPro
         return incident_provider_from_settings(
             analysis_provider=settings.effective_analysis_provider,
             api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
             model=settings.openai_model,
             timeout_seconds=settings.openai_timeout_seconds,
             max_output_tokens=settings.openai_max_output_tokens,

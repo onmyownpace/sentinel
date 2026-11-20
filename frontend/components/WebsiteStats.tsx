@@ -23,13 +23,17 @@ export function WebsiteStatsPanel({ websiteId }: WebsiteStatsPanelProps) {
     getWebsiteStats(websiteId, windowName, controller.signal)
       .then(setStats)
       .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === "AbortError") {
+        if (controller.signal.aborted) {
           return;
         }
         setStats(null);
         setError(err instanceof WebsiteApiError ? err.message : "Stats could not be loaded.");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
     return () => controller.abort();
   }, [websiteId, windowName]);
 

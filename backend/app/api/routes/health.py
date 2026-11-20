@@ -30,6 +30,11 @@ class HealthResponse(BaseModel):
     public_shell: bool = False
     live_browser_enabled: bool = True
     analysis_provider: str = "simulated"
+    # Model id for the active analysis path (simulated-local when forced off).
+    analysis_model: str = "simulated-local"
+    # Hostname only of OPENAI_BASE_URL (e.g. api.together.ai). Never a secret.
+    # Null means the OpenAI SDK default host, or no external endpoint in simulated mode.
+    analysis_base_host: str | None = None
     registration_open: bool = True
 
 
@@ -39,13 +44,19 @@ class ReadinessResponse(HealthResponse):
 
 def _identity() -> dict:
     settings = get_settings()
+    provider = settings.effective_analysis_provider
     return {
         "service": _SERVICE_NAME,
         "version": settings.app_version,
         "environment": settings.environment,
         "public_shell": settings.public_shell,
         "live_browser_enabled": settings.browser_execution_allowed,
-        "analysis_provider": settings.effective_analysis_provider,
+        "analysis_provider": provider,
+        "analysis_model": settings.effective_analysis_model,
+        # Only surface the configured host when live openai-compatible mode is on.
+        "analysis_base_host": (
+            settings.analysis_base_host if provider == "openai" else None
+        ),
         "registration_open": settings.registration_allowed,
     }
 

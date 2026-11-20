@@ -254,7 +254,7 @@ def test_openai_mode_without_key_returns_503(
         response = registry_client.post(f"/api/checks/{check['id']}/analysis")
         assert response.status_code == 503
         detail = response.json()["detail"]
-        assert "OPENAI_API_KEY" in detail
+        assert "OPENAI_API_KEY" in detail or "API key" in detail
         assert "ANALYSIS_PROVIDER" in detail
     finally:
         _delete_website(registry_client, website_id)
@@ -524,6 +524,7 @@ def test_analysis_provider_rejects_unknown_mode(monkeypatch: pytest.MonkeyPatch)
 
 def test_app_defaults_to_simulated_without_openai_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("TOGETHER_API_KEY", raising=False)
     monkeypatch.delenv("ANALYSIS_PROVIDER", raising=False)
     get_settings.cache_clear()
     try:
@@ -531,4 +532,167 @@ def test_app_defaults_to_simulated_without_openai_key(monkeypatch: pytest.Monkey
         assert settings.analysis_provider == "simulated"
         assert settings.openai_api_key in (None, "")
     finally:
+        get_settings.cache_clear()
+
+
+def test_provider_from_settings_passes_together_base_url() -> None:
+    resolved = provider_from_settings(
+        analysis_provider="openai",
+        api_key="together-test-key-not-real",
+        base_url="https://api.together.ai/v1",
+        model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+        timeout_seconds=30,
+        max_output_tokens=1200,
+    )
+    assert resolved.provider_name == "openai"
+    assert resolved.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    assert isinstance(resolved.provider, OpenAIAnalysisProvider)
+    assert resolved.provider.base_url == "https://api.together.ai/v1"
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_requests_together_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the OpenAI SDK: base_url must target api.together.ai and parse must succeed."""
+    captured: dict[str, object] = {}
+    expected = _analysis(
+        summary="Together stub parsed a 503 failure.",
+        limitations="Stubbed Together response for unit tests only.",
+    )
+
+    class FakeMessage:
+        refusal = None
+        parsed = expected
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletion:
+        choices = [FakeChoice()]
+
+    class FakeCompletions:
+        async def parse(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured["parse_kwargs"] = kwargs
+            return FakeCompletion()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            captured["client_kwargs"] = kwargs
+            self.chat = FakeChat()
+
+    import openai
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", FakeAsyncOpenAI)
+
+    provider = OpenAIAnalysisProvider(
+        api_key="together-test-key-not-real",
+        model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+        timeout_seconds=30,
+        max_output_tokens=1200,
+        base_url="https://api.together.ai/v1",
+    )
+    result = await provider.analyze(
+        {
+            "outcome": "failed",
+            "http_status": 503,
+            "page_title": "Unavailable",
+            "final_url": "http://8.8.8.8/down",
+            "duration_ms": 220,
+            "error_message": "The page responded with HTTP 503.",
+            "console_errors": [],
+            "failed_requests": [],
+        }
+    )
+
+    client_kwargs = captured["client_kwargs"]
+    assert isinstance(client_kwargs, dict)
+    assert client_kwargs["base_url"] == "https://api.together.ai/v1"
+    assert "api.together.ai" in str(client_kwargs["base_url"])
+    # Key must be passed to the client but never appears in assertions that print values beyond presence.
+    assert "api_key" in client_kwargs
+    assert client_kwargs["api_key"]
+
+    parse_kwargs = captured["parse_kwargs"]
+    assert isinstance(parse_kwargs, dict)
+    assert parse_kwargs["model"] == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    assert "max_tokens" in parse_kwargs  # custom base_url uses max_tokens, not max_completion_tokens
+    assert result.summary == expected.summary
+    assert result.severity == expected.severity
+
+
+def test_together_analysis_parse_and_save_path(
+    registry_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end: Together base_url settings → stubbed SDK → stored openai row + model."""
+    runner = ScriptedRunner([_observation()])
+    _install_runner(registry_client, runner)
+
+    monkeypatch.setenv("ANALYSIS_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.together.ai/v1")
+    monkeypatch.setenv("OPENAI_API_KEY", "together-test-key-not-real")
+    monkeypatch.setenv("OPENAI_MODEL", "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")
+    monkeypatch.delenv("TOGETHER_API_KEY", raising=False)
+    get_settings.cache_clear()
+    if hasattr(registry_client.app.state, "analysis_provider"):
+        delattr(registry_client.app.state, "analysis_provider")
+    if hasattr(registry_client.app.state, "resolved_analysis_provider"):
+        delattr(registry_client.app.state, "resolved_analysis_provider")
+
+    expected = _analysis(
+        summary="Saved Together-compatible analysis for a 503 check.",
+        limitations="Unit-test stub; not a live Together response.",
+    )
+    captured: dict[str, object] = {}
+
+    class FakeMessage:
+        refusal = None
+        parsed = expected
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletion:
+        choices = [FakeChoice()]
+
+    class FakeCompletions:
+        async def parse(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured["parse_kwargs"] = kwargs
+            return FakeCompletion()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            captured["client_kwargs"] = kwargs
+            self.chat = FakeChat()
+
+    import openai
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", FakeAsyncOpenAI)
+
+    website_id = _create_website(registry_client, f"http://8.8.8.8/{uuid4().hex}")
+    try:
+        check = _run_check(registry_client, website_id)
+        response = registry_client.post(f"/api/checks/{check['id']}/analysis")
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["provider"] == "openai"
+        assert body["model_name"] == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+        assert body["summary"] == expected.summary
+        assert body["severity"] == expected.severity
+
+        client_kwargs = captured["client_kwargs"]
+        assert isinstance(client_kwargs, dict)
+        assert client_kwargs["base_url"] == "https://api.together.ai/v1"
+
+        fetched = registry_client.get(f"/api/checks/{check['id']}/analysis")
+        assert fetched.status_code == 200
+        assert fetched.json()["id"] == body["id"]
+        assert fetched.json()["provider"] == "openai"
+    finally:
+        _delete_website(registry_client, website_id)
         get_settings.cache_clear()
