@@ -240,6 +240,7 @@ def test_failed_probe_can_be_analyzed_anonymously(
     public_shell_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """When ANALYSIS_PROVIDER=simulated, anonymous probe Analyze stays heuristics-only."""
     async def failing_probe(url: str, **_kwargs):
         return failed_observation(
             time.perf_counter(),
@@ -265,3 +266,81 @@ def test_failed_probe_can_be_analyzed_anonymously(
     payload = analysis.json()
     assert payload["provider"] == "simulated"
     assert payload["check_id"] == check_id
+
+
+def test_failed_probe_analyze_uses_configured_provider_when_not_simulated(
+    monkeypatch: pytest.MonkeyPatch,
+    migrated_database: None,
+) -> None:
+    """Public probe Analyze uses configured openai provider when not forced simulated."""
+    from app.services.failure_analysis import FailureAnalysisResult, PossibleCause
+
+    monkeypatch.setenv("PUBLIC_SHELL", "true")
+    monkeypatch.setenv("ANALYSIS_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.together.ai/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")
+    monkeypatch.setenv("SEED_USER_EMAIL", "demo@sentinel.local")
+    monkeypatch.setenv("SEED_USER_PASSWORD", "demo-password-change-me")
+    monkeypatch.setenv("DATABASE_SSL", "false")
+    get_settings.cache_clear()
+    reset_rate_limits()
+
+    class RecordingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def analyze(self, evidence: dict[str, object]) -> FailureAnalysisResult:
+            self.calls += 1
+            return FailureAnalysisResult(
+                summary="Probe analysis via configured provider.",
+                severity="high",
+                confirmed_observations=["HTTP status was 503"],
+                possible_causes=[
+                    PossibleCause(
+                        cause="Origin returned server error",
+                        confidence="medium",
+                        evidence="HTTP 503",
+                    )
+                ],
+                recommended_investigation_steps=["Retry the origin"],
+                limitations="Stubbed live path for tests.",
+            )
+
+    async def failing_probe(url: str, **_kwargs):
+        return failed_observation(
+            time.perf_counter(),
+            "The page responded with HTTP 503.",
+            http_status=503,
+            final_url=url,
+        )
+
+    from app.main import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        provider = RecordingProvider()
+        client.app.state.analysis_provider = provider
+        client.app.state.analysis_provider_name = "openai"
+        client.app.state.analysis_model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+        client.app.state.host_resolver = _public
+        monkeypatch.setattr("app.api.routes.public_demo.probe_http_url", failing_probe)
+        client.cookies.clear()
+
+        response = client.post(
+            "/api/public/demo/probe",
+            json={"url": "https://example.com/down", "authorized": True},
+        )
+        assert response.status_code == 201, response.text
+        check_id = response.json()["id"]
+
+        analysis = client.post(f"/api/public/demo/checks/{check_id}/analysis")
+        assert analysis.status_code in {200, 201}, analysis.text
+        payload = analysis.json()
+        assert provider.calls == 1
+        assert payload["provider"] == "openai"
+        assert payload["model_name"] == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+        assert payload["check_id"] == check_id
+
+    get_settings.cache_clear()
+    reset_rate_limits()

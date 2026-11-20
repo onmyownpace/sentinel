@@ -28,7 +28,6 @@ from app.services.failure_analysis import (
     build_evidence,
     provider_from_settings,
 )
-from app.services.public_demo import is_demo_check_result
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +117,20 @@ async def create_analysis(
     check = await get_visible_check(session, check_id, actor)
     existing = await _get_analysis_for_check(session, check_id)
     if existing is not None:
-        # Cost control / reuse: do not call any provider again for the same check.
-        response.status_code = 200
-        return existing
+        # Cost control / reuse for matching provider. Upgrade leftover simulated
+        # rows when openai/Together is configured so demo Analyze is not stuck.
+        if resolved is None or existing.provider == resolved.provider_name:
+            response.status_code = 200
+            return existing
+        if existing.provider == "simulated" and resolved.provider_name == "openai":
+            try:
+                await session.delete(existing)
+                await session.flush()
+            except _DATABASE_ERRORS as exc:
+                _raise_database_error(exc)
+        else:
+            response.status_code = 200
+            return existing
 
     if check.outcome != "failed":
         raise HTTPException(
@@ -128,27 +138,16 @@ async def create_analysis(
             detail="Only failed checks can be analyzed.",
         )
 
-    # Portfolio/demo sample checks never call paid AI, even when the workspace
-    # is configured for Together/OpenAI on the public shell.
-    active = resolved
-    if is_demo_check_result(check.error_message):
-        active = provider_from_settings(
-            analysis_provider="simulated",
-            api_key=None,
-            model="simulated-local",
-            timeout_seconds=30,
-            max_output_tokens=1200,
-        )
-    if active is None:
+    if resolved is None:
         raise HTTPException(status_code=503, detail=_OPENAI_UNCONFIGURED)
 
     evidence = build_evidence(check)
     try:
-        result = await active.provider.analyze(evidence)
+        result = await resolved.provider.analyze(evidence)
     except AnalysisProviderError as exc:
         raise HTTPException(status_code=502, detail=exc.message) from exc
 
-    row = _row_from_result(check_id, result, active.model_name, active.provider_name)
+    row = _row_from_result(check_id, result, resolved.model_name, resolved.provider_name)
     session.add(row)
     try:
         await session.commit()

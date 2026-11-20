@@ -1,4 +1,4 @@
-"""Public shell: no live Chromium, closed registration; demo AI stays simulated."""
+"""Public shell: no live Chromium, closed registration; Analyze uses configured provider."""
 
 from uuid import uuid4
 
@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 from app.core.config import DEFAULT_TOGETHER_MODEL, Settings, get_settings
 from app.core.database import create_db_engine
+from app.services.failure_analysis import AnalysisProviderError, FailureAnalysisResult, PossibleCause
+from app.services.public_rate_limit import reset_rate_limits
 from app.services.results import CheckObservation
 
 
@@ -33,9 +35,8 @@ def public_shell_client(monkeypatch: pytest.MonkeyPatch, migrated_database: None
     monkeypatch.setenv("PUBLIC_SHELL", "true")
     monkeypatch.setenv("LIVE_BROWSER_ENABLED", "true")  # must still be forced off
     monkeypatch.setenv("ANALYSIS_PROVIDER", "openai")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-used")
-    # Together-oriented env must still be ignored in the public portfolio shell.
-    monkeypatch.setenv("TOGETHER_API_KEY", "together-should-not-be-used")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-together-key-not-real")
+    monkeypatch.setenv("TOGETHER_API_KEY", "together-alias-unused-when-openai-set")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.together.ai/v1")
     monkeypatch.setenv("OPENAI_MODEL", "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")
     monkeypatch.setenv("SEED_USER_EMAIL", "demo@sentinel.local")
@@ -43,12 +44,60 @@ def public_shell_client(monkeypatch: pytest.MonkeyPatch, migrated_database: None
     monkeypatch.setenv("ALLOW_REGISTRATION", "true")
     monkeypatch.setenv("DATABASE_SSL", "false")  # local Postgres in tests
     get_settings.cache_clear()
+    reset_rate_limits()
     from app.main import create_app
 
     app = create_app()
     with TestClient(app) as client:
         yield client
     get_settings.cache_clear()
+    reset_rate_limits()
+
+
+class RecordingProvider:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls = 0
+        self.fail = fail
+
+    async def analyze(self, evidence: dict[str, object]) -> FailureAnalysisResult:
+        self.calls += 1
+        if self.fail:
+            raise AnalysisProviderError("The analysis provider could not complete the request.")
+        return FailureAnalysisResult(
+            summary="Live demo analysis via configured provider.",
+            severity="medium",
+            confirmed_observations=["HTTP status was 503"],
+            possible_causes=[
+                PossibleCause(
+                    cause="Upstream outage",
+                    confidence="medium",
+                    evidence="HTTP 503",
+                )
+            ],
+            recommended_investigation_steps=["Check origin health"],
+            limitations="Test provider — stubbed live path.",
+        )
+
+
+def _clear_analysis(check_id: str) -> None:
+    """Remove any stored analysis so provider tests start from a clean check."""
+    import asyncio
+
+    import asyncpg
+
+    dsn = get_settings().database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    async def _delete() -> None:
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute(
+                "DELETE FROM check_failure_analyses WHERE check_id = $1::uuid",
+                check_id,
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(_delete())
 
 
 def test_public_shell_settings_force_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,26 +159,21 @@ def test_health_reports_public_shell(public_shell_client: TestClient) -> None:
     body = response.json()
     assert body["public_shell"] is True
     assert body["live_browser_enabled"] is False
-    # Workspace provider is configured (Together-compatible); demo rows stay simulated
-    # in the analysis routes, not via this health field.
+    # Health reports the configured workspace/public provider (Together-compatible).
     assert body["analysis_provider"] == "openai"
     assert body["analysis_model"] == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
     assert body["analysis_base_host"] == "api.together.ai"
     assert body["registration_open"] is False
 
 
-def test_public_shell_demo_analysis_stays_simulated(
+def test_public_shell_demo_analysis_uses_configured_provider(
     public_shell_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Seeded portfolio demo checks must stay simulated even with Together keys set."""
-
-    def boom_openai(*_args, **_kwargs):
-        raise AssertionError("AsyncOpenAI must not be constructed for demo checks")
-
-    import openai
-
-    monkeypatch.setattr(openai, "AsyncOpenAI", boom_openai)
+    """Seeded portfolio demo checks use the configured openai provider when not forced simulated."""
+    provider = RecordingProvider()
+    public_shell_client.app.state.analysis_provider = provider
+    public_shell_client.app.state.analysis_provider_name = "openai"
+    public_shell_client.app.state.analysis_model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
 
     login = public_shell_client.post(
         "/api/auth/login",
@@ -149,13 +193,15 @@ def test_public_shell_demo_analysis_stays_simulated(
     failed = [row for row in checks.json() if row["outcome"] == "failed"]
     assert failed, "public shell should seed a failed demo check"
     check_id = failed[0]["id"]
+    _clear_analysis(check_id)
 
     response = public_shell_client.post(f"/api/checks/{check_id}/analysis")
     assert response.status_code in {200, 201}, response.text
     body = response.json()
-    assert body["provider"] == "simulated"
-    assert body["model_name"] == "simulated-local"
-    assert "SIMULATED" in body["limitations"].upper() or "simulated" in body["summary"].lower()
+    assert provider.calls == 1
+    assert body["provider"] == "openai"
+    assert body["model_name"] == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    assert "Live demo analysis" in body["summary"]
 
 
 def test_public_shell_workspace_analysis_uses_configured_provider(
@@ -165,29 +211,6 @@ def test_public_shell_workspace_analysis_uses_configured_provider(
     import asyncio
 
     import asyncpg
-
-    from app.services.failure_analysis import FailureAnalysisResult, PossibleCause
-
-    class RecordingProvider:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        async def analyze(self, evidence: dict[str, object]) -> FailureAnalysisResult:
-            self.calls += 1
-            return FailureAnalysisResult(
-                summary="Workspace analysis via configured provider.",
-                severity="medium",
-                confirmed_observations=["HTTP status was 503"],
-                possible_causes=[
-                    PossibleCause(
-                        cause="Upstream outage",
-                        confidence="medium",
-                        evidence="HTTP 503",
-                    )
-                ],
-                recommended_investigation_steps=["Check origin health"],
-                limitations="Test provider — not a live model call.",
-            )
 
     provider = RecordingProvider()
     public_shell_client.app.state.analysis_provider = provider
@@ -244,18 +267,14 @@ def test_public_shell_workspace_analysis_uses_configured_provider(
     assert body["model_name"] == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
 
 
-def test_anonymous_can_load_demo_failure_and_analysis(
+def test_anonymous_public_analyze_uses_configured_provider(
     public_shell_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Strangers load the seeded failure + simulated analysis with no cookies."""
-
-    def boom_openai(*_args, **_kwargs):
-        raise AssertionError("AsyncOpenAI must not be constructed for public demo analysis")
-
-    import openai
-
-    monkeypatch.setattr(openai, "AsyncOpenAI", boom_openai)
+    """Anonymous public Analyze uses configured provider when not forced simulated."""
+    provider = RecordingProvider()
+    public_shell_client.app.state.analysis_provider = provider
+    public_shell_client.app.state.analysis_provider_name = "openai"
+    public_shell_client.app.state.analysis_model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
 
     # No login — clear any cookies the client may hold.
     public_shell_client.cookies.clear()
@@ -271,13 +290,22 @@ def test_anonymous_can_load_demo_failure_and_analysis(
     check = public_shell_client.get(f"/api/public/demo/checks/{failed_id}")
     assert check.status_code == 200, check.text
     assert check.json()["http_status"] == 503
+    _clear_analysis(failed_id)
 
     analysis = public_shell_client.post(f"/api/public/demo/checks/{failed_id}/analysis")
     assert analysis.status_code in {200, 201}, analysis.text
     payload = analysis.json()
-    assert payload["provider"] == "simulated"
-    assert payload["model_name"] == "simulated-local"
+    assert provider.calls == 1
+    assert payload["provider"] == "openai"
+    assert payload["model_name"] == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
     assert payload["check_id"] == failed_id
+    assert "Live demo analysis" in payload["summary"]
+
+    # Repeat Analyze reuses the stored live row (no second provider call).
+    again = public_shell_client.post(f"/api/public/demo/checks/{failed_id}/analysis")
+    assert again.status_code == 200, again.text
+    assert provider.calls == 1
+    assert again.json()["provider"] == "openai"
 
     dashboard = public_shell_client.get("/api/public/demo/dashboard")
     assert dashboard.status_code == 200, dashboard.text
@@ -285,6 +313,111 @@ def test_anonymous_can_load_demo_failure_and_analysis(
     assert len(dash["websites"]) == 1
     assert dash["websites"][0]["name"].startswith("[Demo]")
     assert dash["health"]["recent_failure_count"] >= 1
+
+
+def test_anonymous_public_analyze_upgrades_leftover_simulated(
+    public_shell_client: TestClient,
+) -> None:
+    """Leftover simulated rows are replaced when openai/Together is configured."""
+    import asyncio
+
+    import asyncpg
+
+    public_shell_client.cookies.clear()
+    snapshot = public_shell_client.get("/api/public/demo")
+    failed_id = snapshot.json()["failed_check_id"]
+    assert failed_id
+    _clear_analysis(failed_id)
+
+    dsn = get_settings().database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    async def _insert_simulated() -> None:
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute(
+                """
+                INSERT INTO check_failure_analyses (
+                    id, check_id, summary, severity, confirmed_observations,
+                    possible_causes, recommended_investigation_steps, limitations,
+                    model_name, provider, created_at
+                ) VALUES (
+                    gen_random_uuid(), $1::uuid,
+                    'Simulated analysis of the stored failed check.',
+                    'medium', '["obs"]'::jsonb,
+                    '[{"cause":"c","confidence":"low","evidence":"e"}]'::jsonb,
+                    '["step"]'::jsonb, 'SIMULATED only.',
+                    'simulated-local', 'simulated', NOW()
+                )
+                """,
+                failed_id,
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(_insert_simulated())
+
+    provider = RecordingProvider()
+    public_shell_client.app.state.analysis_provider = provider
+    public_shell_client.app.state.analysis_provider_name = "openai"
+    public_shell_client.app.state.analysis_model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+
+    response = public_shell_client.post(f"/api/public/demo/checks/{failed_id}/analysis")
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert provider.calls == 1
+    assert body["provider"] == "openai"
+    assert "Live demo analysis" in body["summary"]
+
+
+def test_anonymous_public_analyze_surfaces_provider_failure(
+    public_shell_client: TestClient,
+) -> None:
+    """Together/provider failure must return a clear 502 — not silent simulated success."""
+    provider = RecordingProvider(fail=True)
+    public_shell_client.app.state.analysis_provider = provider
+    public_shell_client.app.state.analysis_provider_name = "openai"
+    public_shell_client.app.state.analysis_model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    public_shell_client.cookies.clear()
+
+    snapshot = public_shell_client.get("/api/public/demo")
+    assert snapshot.status_code == 200
+    failed_id = snapshot.json()["failed_check_id"]
+    assert failed_id
+    _clear_analysis(failed_id)
+
+    response = public_shell_client.post(f"/api/public/demo/checks/{failed_id}/analysis")
+    assert response.status_code == 502, response.text
+    detail = response.json()["detail"]
+    assert "provider" in detail.lower()
+    assert provider.calls == 1
+    # No simulated row should have been stored.
+    missing = public_shell_client.get(f"/api/public/demo/checks/{failed_id}/analysis")
+    assert missing.status_code == 404
+
+
+def test_anonymous_public_analyze_rate_limited(
+    public_shell_client: TestClient,
+) -> None:
+    """Public Analyze is abuse-guarded with a per-client rate limit."""
+    provider = RecordingProvider()
+    public_shell_client.app.state.analysis_provider = provider
+    public_shell_client.app.state.analysis_provider_name = "openai"
+    public_shell_client.app.state.analysis_model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    public_shell_client.cookies.clear()
+
+    snapshot = public_shell_client.get("/api/public/demo")
+    failed_id = snapshot.json()["failed_check_id"]
+    assert failed_id
+    _clear_analysis(failed_id)
+
+    # First call creates; subsequent reuse still counts against the rate limit.
+    statuses = []
+    for _ in range(6):
+        statuses.append(
+            public_shell_client.post(f"/api/public/demo/checks/{failed_id}/analysis").status_code
+        )
+    assert 429 in statuses
+    assert any(code in {200, 201} for code in statuses)
 
 
 def test_anonymous_public_demo_hides_non_demo_data(

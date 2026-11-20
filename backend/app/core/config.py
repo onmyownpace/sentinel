@@ -43,8 +43,8 @@ class Settings(BaseSettings):
     environment: str = "development"
     # Public shell: $0 Render+Neon portfolio mode. Disables live Chromium
     # and closes open registration. Does not force analysis to simulated —
-    # signed-in workspace may use ANALYSIS_PROVIDER=openai (Together).
-    # Seeded demo/portfolio checks still use simulated analysis in routes.
+    # PUBLIC_SHELL / anonymous demo Analyze uses ANALYSIS_PROVIDER as configured
+    # (Together via openai + OPENAI_BASE_URL + key when set on Render).
     # Local default is off.
     public_shell: bool = False
     # Explicit kill switch for Playwright execution. Public shell forces off
@@ -270,10 +270,11 @@ class Settings(BaseSettings):
 
     @property
     def effective_analysis_provider(self) -> Literal["simulated", "openai"]:
-        """Provider for signed-in workspace analysis.
+        """Provider for signed-in and public demo Analyze.
 
-        Public shell no longer overrides this. Seeded demo/portfolio rows are
-        forced to simulated in the analysis routes instead.
+        Public shell does not override this. Anonymous `/api/public/demo`
+        analysis uses the same configured provider (Together when openai +
+        base URL + key are set).
         """
         return self.analysis_provider
 

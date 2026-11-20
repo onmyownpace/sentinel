@@ -1,9 +1,13 @@
-"""Anonymous read (+ simulated analyze) for the seeded portfolio demo only.
+"""Anonymous read + Analyze for the seeded portfolio demo only.
 
 These routes never require a session cookie. They expose only the seeded
 `[Demo]` site and checks marked with the public-demo / lightweight-probe
 markers. Non-demo rows stay 404. Writes are limited to lightweight HTTP
-probes and storing a simulated analysis — no registry mutations, no Playwright.
+probes and storing analysis — no registry mutations, no Playwright.
+
+Public Analyze uses the configured ANALYSIS_PROVIDER (Together / OpenAI-
+compatible when set). It is rate-limited. Provider failures return a clear
+error — never a silent simulated success.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
+from app.core.config import get_settings
 from app.models.check_analysis import CheckFailureAnalysis
 from app.models.website import Website
 from app.models.website_check import WebsiteCheck
@@ -31,7 +36,13 @@ from app.services.check_stats import (
     summarize_checks,
     window_since,
 )
-from app.services.failure_analysis import build_evidence, provider_from_settings
+from app.services.failure_analysis import (
+    AnalysisNotConfiguredError,
+    AnalysisProviderError,
+    ResolvedAnalysisProvider,
+    build_evidence,
+    provider_from_settings,
+)
 from app.services.http_probe import attach_probe_marker, probe_http_url
 from app.services.network import ResolveHost, TargetNotAllowed, ensure_public_http_url
 from app.services.public_demo import (
@@ -50,6 +61,15 @@ router = APIRouter(prefix="/api/public/demo", tags=["public-demo"])
 _DATABASE_ERRORS = (SQLAlchemyError, OSError, TimeoutError, ConnectionError)
 _RECENT_CHECK_LIMIT = 20
 _DASH_STATS_SAMPLE = 100
+# Tighter than probe: each miss can spend a paid Together credit.
+_PUBLIC_ANALYZE_LIMIT = 5
+_PUBLIC_ANALYZE_WINDOW_SECONDS = 60.0
+
+_OPENAI_UNCONFIGURED = (
+    "AI failure analysis is set to openai but no API key is configured. "
+    "Set OPENAI_API_KEY (or TOGETHER_API_KEY as a fallback alias), "
+    "or set ANALYSIS_PROVIDER=simulated, then restart the API."
+)
 
 
 class PublicDemoWebsite(BaseModel):
@@ -201,6 +221,43 @@ class PublicDemoCheckRequest(BaseModel):
 
 def get_host_resolver(request: Request) -> ResolveHost | None:
     return getattr(request.app.state, "host_resolver", None)
+
+
+def get_resolved_public_analysis_provider(
+    request: Request,
+) -> ResolvedAnalysisProvider | None:
+    """Prefer test overrides; otherwise build from ANALYSIS_PROVIDER settings.
+
+    Same contract as signed-in analysis: tests may install
+    `app.state.analysis_provider` / `resolved_analysis_provider`, or set the
+    provider to `None` to force the unconfigured path.
+    """
+    if hasattr(request.app.state, "resolved_analysis_provider"):
+        return request.app.state.resolved_analysis_provider
+    if hasattr(request.app.state, "analysis_provider"):
+        installed = request.app.state.analysis_provider
+        if installed is None:
+            return None
+        model_name = getattr(request.app.state, "analysis_model_name", "test-model")
+        provider_name = getattr(request.app.state, "analysis_provider_name", "simulated")
+        return ResolvedAnalysisProvider(
+            provider=installed,
+            provider_name=provider_name,
+            model_name=model_name if isinstance(model_name, str) else "test-model",
+        )
+
+    settings = get_settings()
+    try:
+        return provider_from_settings(
+            analysis_provider=settings.effective_analysis_provider,
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+            model=settings.openai_model,
+            timeout_seconds=settings.openai_timeout_seconds,
+            max_output_tokens=settings.openai_max_output_tokens,
+        )
+    except AnalysisNotConfiguredError:
+        return None
 
 
 def _client_key(request: Request) -> str:
@@ -515,10 +572,25 @@ async def get_public_demo_analysis(
 )
 async def create_public_demo_analysis(
     check_id: UUID,
+    request: Request,
     response: Response,
     session: AsyncSession = Depends(get_session),
+    resolved: ResolvedAnalysisProvider | None = Depends(get_resolved_public_analysis_provider),
 ) -> CheckFailureAnalysis:
-    """Simulated analysis for a demo failure. Never calls a paid provider."""
+    """Analyze a demo/probe failure with the configured provider (Together when live)."""
+    try:
+        check_rate_limit(
+            f"analyze:{_client_key(request)}",
+            limit=_PUBLIC_ANALYZE_LIMIT,
+            window_seconds=_PUBLIC_ANALYZE_WINDOW_SECONDS,
+        )
+    except RateLimited as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many public analyses from this address. Try again in a minute.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+
     try:
         check = await require_demo_check(session, check_id)
     except LookupError:
@@ -527,22 +599,35 @@ async def create_public_demo_analysis(
         _raise_database_error(exc)
 
     existing = await _get_analysis(session, check_id)
+    # Reuse a live result. Upgrade a leftover simulated row when openai/Together
+    # is configured so visitors are not stuck on heuristics after deploy.
     if existing is not None:
-        response.status_code = 200
-        return existing
+        if resolved is None or existing.provider == resolved.provider_name:
+            response.status_code = 200
+            return existing
+        if existing.provider == "simulated" and resolved.provider_name == "openai":
+            try:
+                await session.delete(existing)
+                await session.flush()
+            except _DATABASE_ERRORS as exc:
+                _raise_database_error(exc)
+            existing = None
+        else:
+            response.status_code = 200
+            return existing
 
     if check.outcome != "failed":
         raise HTTPException(status_code=422, detail="Only failed checks can be analyzed.")
 
-    resolved = provider_from_settings(
-        analysis_provider="simulated",
-        api_key=None,
-        model="simulated-local",
-        timeout_seconds=30,
-        max_output_tokens=1200,
-    )
+    if resolved is None:
+        raise HTTPException(status_code=503, detail=_OPENAI_UNCONFIGURED)
+
     evidence = build_evidence(check)
-    result = await resolved.provider.analyze(evidence)
+    try:
+        result = await resolved.provider.analyze(evidence)
+    except AnalysisProviderError as exc:
+        raise HTTPException(status_code=502, detail=exc.message) from exc
+
     row = CheckFailureAnalysis(
         check_id=check_id,
         summary=result.summary,
