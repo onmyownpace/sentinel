@@ -337,9 +337,27 @@ def test_registration_blocked(public_shell_client: TestClient) -> None:
     assert "registration" in response.json()["detail"].lower()
 
 
-def test_live_check_blocked(public_shell_client: TestClient) -> None:
+def test_live_check_falls_back_to_http_probe(public_shell_client: TestClient, monkeypatch) -> None:
+    """Public shell must not 503 on Run check — use lightweight HTTP probe instead."""
+    from app.services.results import CheckObservation
+
     runner = ScriptedRunner()
     public_shell_client.app.state.check_runner = runner
+
+    async def fake_probe(url: str, **_kwargs):
+        return CheckObservation(
+            outcome="success",
+            http_status=200,
+            page_title="Probed",
+            final_url=url,
+            duration_ms=12,
+            console_errors=(),
+            failed_requests=(),
+            error_message=None,
+        )
+
+    monkeypatch.setattr("app.api.routes.checks.probe_http_url", fake_probe)
+
     login = public_shell_client.post(
         "/api/auth/login",
         json={"email": "demo@sentinel.local", "password": "demo-password-change-me"},
@@ -351,12 +369,14 @@ def test_live_check_blocked(public_shell_client: TestClient) -> None:
     )
     assert created.status_code == 201, created.text
     website_id = created.json()["id"]
-    blocked = public_shell_client.post(
+    response = public_shell_client.post(
         f"/api/websites/{website_id}/checks",
         json={"authorized": True},
     )
-    assert blocked.status_code == 503
-    assert "public shell" in blocked.json()["detail"].lower()
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["http_status"] == 200
+    assert "Lightweight HTTP probe" in (body["error_message"] or "")
     assert runner.calls == 0
 
 

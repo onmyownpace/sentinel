@@ -18,7 +18,7 @@ Assessment background: agent-store `docs/render-neon-compatibility.md` (**no-go*
 | Registration | open | **closed** (demo login only) |
 | Postgres | Compose, usually no TLS | **Neon + SSL** |
 | n8n / Mailpit | Compose profiles | **local only** — not on Render Free |
-| Primary product surface | Dashboard | Dashboard (Status = footer Diagnostics) |
+| Primary product surface | Dashboard | Dashboard (no Status/Diagnostics in visitor chrome) |
 
 ## Feature flags
 

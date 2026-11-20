@@ -1,9 +1,9 @@
 """Anonymous read (+ simulated analyze) for the seeded portfolio demo only.
 
 These routes never require a session cookie. They expose only the seeded
-`[Demo]` site and checks marked with the public-demo error marker. Non-demo
-rows stay 404. Writes are limited to storing a simulated analysis for a demo
-failure — no registry mutations, no live browser runs.
+`[Demo]` site and checks marked with the public-demo / lightweight-probe
+markers. Non-demo rows stay 404. Writes are limited to lightweight HTTP
+probes and storing a simulated analysis — no registry mutations, no Playwright.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from datetime import datetime
 from typing import NoReturn
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,12 +32,16 @@ from app.services.check_stats import (
     window_since,
 )
 from app.services.failure_analysis import build_evidence, provider_from_settings
+from app.services.http_probe import attach_probe_marker, probe_http_url
+from app.services.network import ResolveHost, TargetNotAllowed, ensure_public_http_url
 from app.services.public_demo import (
     get_seeded_demo_website,
     is_demo_check_result,
     require_demo_check,
     require_demo_website,
 )
+from app.services.public_rate_limit import RateLimited, check_rate_limit
+from app.services.results import sanitize_url
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +158,185 @@ class PublicDemoDashboard(BaseModel):
     history_window: str
     recent_check_limit: int
     health: PublicDemoDashboardHealth
+
+
+class PublicProbeRequest(BaseModel):
+    """Anonymous lightweight check: public HTTP(S) URL only."""
+
+    url: str = Field(min_length=8, max_length=2048)
+    authorized: bool
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"url": "https://example.com", "authorized": True}]
+        }
+    )
+
+    @field_validator("authorized")
+    @classmethod
+    def must_be_confirmed(cls, value: bool) -> bool:
+        if value is not True:
+            raise ValueError("Confirm that you are authorized to test this website")
+        return value
+
+    @field_validator("url")
+    @classmethod
+    def url_must_look_http(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned.lower().startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return cleaned
+
+
+class PublicDemoCheckRequest(BaseModel):
+    authorized: bool
+
+    @field_validator("authorized")
+    @classmethod
+    def must_be_confirmed(cls, value: bool) -> bool:
+        if value is not True:
+            raise ValueError("Confirm that you are authorized to test this website")
+        return value
+
+
+def get_host_resolver(request: Request) -> ResolveHost | None:
+    return getattr(request.app.state, "host_resolver", None)
+
+
+def _client_key(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip() or "unknown"
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+@router.post("/probe", response_model=PublicDemoCheck, status_code=201)
+async def run_public_probe(
+    payload: PublicProbeRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    resolver: ResolveHost | None = Depends(get_host_resolver),
+) -> PublicDemoCheck:
+    """Anonymous lightweight HTTP probe. Stores the result on the demo site."""
+    try:
+        check_rate_limit(f"probe:{_client_key(request)}")
+    except RateLimited as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many public checks from this address. Try again in a minute.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+
+    try:
+        await ensure_public_http_url(payload.url, resolve=resolver)
+    except TargetNotAllowed as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+
+    try:
+        website = await get_seeded_demo_website(session)
+        if website is None:
+            raise HTTPException(status_code=404, detail="Public demo is not available.")
+    except _DATABASE_ERRORS as exc:
+        _raise_database_error(exc)
+
+    observation = attach_probe_marker(
+        await probe_http_url(payload.url, resolve=resolver)
+    )
+    row = WebsiteCheck(
+        website_id=website.id,
+        outcome=observation.outcome,
+        http_status=observation.http_status,
+        page_title=observation.page_title,
+        final_url=observation.final_url or sanitize_url(payload.url),
+        duration_ms=observation.duration_ms,
+        console_errors=list(observation.console_errors),
+        failed_requests=[
+            {"url": item.url, "error": item.error} for item in observation.failed_requests
+        ],
+        error_message=observation.error_message,
+        screenshot_path=None,
+    )
+    if row.final_url == "non-http resource":
+        row.final_url = None
+    session.add(row)
+    try:
+        await session.commit()
+        await session.refresh(row)
+    except _DATABASE_ERRORS as exc:
+        try:
+            await session.rollback()
+        except _DATABASE_ERRORS:
+            logger.warning("Public probe rollback failed")
+        _raise_database_error(exc)
+    return _check_response(row)
+
+
+@router.post(
+    "/websites/{website_id}/checks",
+    response_model=PublicDemoCheck,
+    status_code=201,
+)
+async def run_public_demo_site_probe(
+    website_id: UUID,
+    payload: PublicDemoCheckRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    resolver: ResolveHost | None = Depends(get_host_resolver),
+) -> PublicDemoCheck:
+    """Lightweight probe of the seeded demo site's base URL (no Playwright)."""
+    try:
+        check_rate_limit(f"probe:{_client_key(request)}")
+    except RateLimited as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many public checks from this address. Try again in a minute.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+
+    try:
+        website = await require_demo_website(session, website_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Website not found.") from None
+    except _DATABASE_ERRORS as exc:
+        _raise_database_error(exc)
+
+    try:
+        await ensure_public_http_url(website.base_url, resolve=resolver)
+    except TargetNotAllowed as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+
+    observation = attach_probe_marker(
+        await probe_http_url(website.base_url, resolve=resolver)
+    )
+    row = WebsiteCheck(
+        website_id=website.id,
+        outcome=observation.outcome,
+        http_status=observation.http_status,
+        page_title=observation.page_title,
+        final_url=observation.final_url or sanitize_url(website.base_url),
+        duration_ms=observation.duration_ms,
+        console_errors=list(observation.console_errors),
+        failed_requests=[
+            {"url": item.url, "error": item.error} for item in observation.failed_requests
+        ],
+        error_message=observation.error_message,
+        screenshot_path=None,
+    )
+    if row.final_url == "non-http resource":
+        row.final_url = None
+    session.add(row)
+    try:
+        await session.commit()
+        await session.refresh(row)
+    except _DATABASE_ERRORS as exc:
+        try:
+            await session.rollback()
+        except _DATABASE_ERRORS:
+            logger.warning("Public demo site probe rollback failed")
+        _raise_database_error(exc)
+    return _check_response(row)
 
 
 @router.get("", response_model=PublicDemoSnapshot)

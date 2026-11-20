@@ -30,6 +30,7 @@ from app.models.website import Website
 from app.models.website_check import WebsiteCheck
 from app.services.browser import CheckRunner, runner_from_settings
 from app.services.check_stats import clamp_history_limit, parse_window, window_since
+from app.services.http_probe import attach_probe_marker, probe_http_url
 from app.services.network import ResolveHost, TargetNotAllowed, ensure_public_http_url
 from app.services.results import (
     PAGE_COULD_NOT_BE_OPENED,
@@ -121,14 +122,20 @@ async def run_check(
     runner: CheckRunner = Depends(get_check_runner),
     resolver: ResolveHost | None = Depends(get_host_resolver),
 ) -> WebsiteCheck:
-    """Open the website after a human acknowledgement, store the result, and return it."""
-    reject_if_live_browser_disabled()
+    """Open the website after a human acknowledgement, store the result, and return it.
+
+    When live Chromium is disabled (public shell), falls back to a lightweight
+    HTTP probe instead of returning a confusing 503.
+    """
     if not payload.authorized:
         raise HTTPException(
             status_code=422,
             detail="Confirm that you are authorized to test this website.",
         )
     website = await get_visible_website(session, website_id, actor)
+    settings = get_settings()
+    if not settings.browser_execution_allowed:
+        return await _run_and_store_http_probe(session, website, resolver)
     return await _run_and_store_check(session, website, runner, resolver)
 
 
@@ -241,7 +248,7 @@ async def _run_and_store_check(
     runner: CheckRunner,
     resolver: ResolveHost | None,
 ) -> WebsiteCheck:
-    """Shared path for manual and scheduled checks."""
+    """Shared path for manual and scheduled Playwright checks."""
     try:
         await ensure_public_http_url(website.base_url, resolve=resolver)
     except TargetNotAllowed as exc:
@@ -285,6 +292,40 @@ async def _run_and_store_check(
             row.screenshot_path = relative
             await _commit(session)
             await _refresh(session, row)
+    return row
+
+
+async def _run_and_store_http_probe(
+    session: AsyncSession,
+    website: Website,
+    resolver: ResolveHost | None,
+) -> WebsiteCheck:
+    """Public-shell fallback: HTTP GET probe instead of Chromium."""
+    try:
+        await ensure_public_http_url(website.base_url, resolve=resolver)
+    except TargetNotAllowed as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+
+    observation = attach_probe_marker(
+        await probe_http_url(website.base_url, resolve=resolver)
+    )
+    row = WebsiteCheck(
+        website_id=website.id,
+        outcome=observation.outcome,
+        http_status=observation.http_status,
+        page_title=observation.page_title,
+        final_url=observation.final_url,
+        duration_ms=observation.duration_ms,
+        console_errors=list(observation.console_errors),
+        failed_requests=[
+            {"url": item.url, "error": item.error} for item in observation.failed_requests
+        ],
+        error_message=observation.error_message,
+        screenshot_path=None,
+    )
+    session.add(row)
+    await _commit(session)
+    await _refresh(session, row)
     return row
 
 

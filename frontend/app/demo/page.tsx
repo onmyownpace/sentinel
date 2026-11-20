@@ -10,10 +10,10 @@ export default function DemoPage() {
     <main className="wide workspace demo-page">
       <header className="workspace-hero demo-hero">
         <p className="workspace-kicker">Portfolio demo · no login</p>
-        <h1>A failed check, explained</h1>
+        <h1>Test a site, or try the sample</h1>
         <p>
-          Sample monitoring data from the seeded demo site. Open the failure, run analysis, and
-          see what Sentinel surfaces — no account required.
+          Run a lightweight HTTP check on any public URL, or open the seeded failure and analysis —
+          no account required.
         </p>
       </header>
       <DemoExperience />
