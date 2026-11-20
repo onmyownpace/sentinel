@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { CheckResult } from "@/components/CheckResult";
 import type { FailureAnalysis } from "@/lib/analysis";
 import type { WebsiteCheck } from "@/lib/checks";
+import { getDeploymentMode } from "@/lib/deployment";
 import {
   createPublicDemoAnalysis,
   getPublicDemo,
@@ -25,14 +26,19 @@ export function DemoExperience() {
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [probeResult, setProbeResult] = useState<WebsiteCheck | null>(null);
+  const [liveAnalysis, setLiveAnalysis] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    getPublicDemo(controller.signal)
-      .then((data) => {
+    Promise.all([
+      getPublicDemo(controller.signal),
+      getDeploymentMode(controller.signal),
+    ])
+      .then(([data, mode]) => {
         setSnapshot(data);
         setAnalysis(data.analysis);
+        setLiveAnalysis(mode.analysisProvider === "openai");
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) {
@@ -210,10 +216,12 @@ export function DemoExperience() {
         <section className="card demo-analysis-card" aria-label="Failure analysis">
           <h2>AI failure analysis</h2>
           <p className="hint tight">
-            Simulated on the public portfolio shell — no paid model call for this sample.
+            {liveAnalysis
+              ? "Uses the live configured model on this host (OpenAI-compatible / Together). Anonymous Analyze is rate-limited."
+              : "Uses the configured analysis provider. This host is on local heuristics until a live provider is set."}
           </p>
           {error ? (
-            <p className="banner warn" role="alert">
+            <p className="banner bad" role="alert">
               {error}
             </p>
           ) : null}
@@ -238,14 +246,23 @@ export function DemoExperience() {
 }
 
 function DemoAnalysisResult({ analysis }: { analysis: FailureAnalysis }) {
+  const simulated = analysis.provider === "simulated";
+
   return (
     <div className="analysis-result demo-analysis-result">
-      <p className="banner warn" role="status">
-        Simulated analysis — local heuristics only. This is not output from a live AI model.
-      </p>
+      {simulated ? (
+        <p className="banner warn" role="status">
+          Simulated analysis — local heuristics only. This is not output from a live AI model.
+        </p>
+      ) : (
+        <p className="banner ok" role="status">
+          Live model analysis — response parsed and saved for this check.
+        </p>
+      )}
       <p className="meta">
-        Provider: {analysis.provider} · Severity: {analysis.severity} · Model:{" "}
-        {analysis.model_name}
+        Provider: {analysis.provider}
+        {analysis.provider === "openai" ? " (OpenAI-compatible)" : ""} · Severity:{" "}
+        {analysis.severity} · Model: {analysis.model_name}
       </p>
       <p>{analysis.summary}</p>
       <section>
