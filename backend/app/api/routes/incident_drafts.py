@@ -30,6 +30,7 @@ from app.services.incident_drafts import (
     incident_provider_from_settings,
     source_fingerprint,
 )
+from app.services.public_demo import is_demo_website_name
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,16 @@ async def create_incident_draft(
             response.status_code = 200
             return existing
 
-    if resolved is None:
+    active = resolved
+    if is_demo_website_name(website.name):
+        active = incident_provider_from_settings(
+            analysis_provider="simulated",
+            api_key=None,
+            model="simulated-local",
+            timeout_seconds=30,
+            max_output_tokens=1200,
+        )
+    if active is None:
         raise HTTPException(status_code=503, detail=_OPENAI_UNCONFIGURED)
 
     analyses = await _load_analyses(session, [row.id for row in checks])
@@ -146,7 +156,7 @@ async def create_incident_draft(
         failed_check_limit=failed_limit,
     )
     try:
-        result = await resolved.provider.draft(evidence)
+        result = await active.provider.draft(evidence)
     except AnalysisProviderError as exc:
         raise HTTPException(status_code=502, detail=exc.message) from exc
 
@@ -157,8 +167,8 @@ async def create_incident_draft(
         failed_limit=failed_limit,
         fingerprint=fingerprint,
         result=result,
-        model_name=resolved.model_name,
-        provider_name=resolved.provider_name,
+        model_name=active.model_name,
+        provider_name=active.provider_name,
     )
     session.add(row)
     try:

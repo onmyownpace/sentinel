@@ -91,3 +91,27 @@ def test_blank_openai_base_url_becomes_none(monkeypatch: pytest.MonkeyPatch) -> 
         assert settings.analysis_base_host is None
     finally:
         get_settings.cache_clear()
+
+
+def test_public_shell_preserves_together_workspace_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PUBLIC_SHELL must not rewrite ANALYSIS_PROVIDER=openai away from Together."""
+    monkeypatch.setenv("PUBLIC_SHELL", "true")
+    monkeypatch.setenv("ANALYSIS_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "together-hosted-key-not-real")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.together.ai/v1")
+    monkeypatch.setenv("OPENAI_MODEL", "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo")
+    monkeypatch.setenv("DATABASE_SSL", "false")
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        assert settings.public_shell is True
+        assert settings.browser_execution_allowed is False
+        assert settings.registration_allowed is False
+        assert settings.effective_analysis_provider == "openai"
+        assert settings.analysis_provider == "openai"
+        assert settings.is_together_endpoint is True
+        assert settings.effective_analysis_model == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    finally:
+        get_settings.cache_clear()

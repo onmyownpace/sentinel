@@ -19,6 +19,19 @@ logger = logging.getLogger(__name__)
 DEMO_SITE_NAME = "[Demo] Example status page"
 DEMO_SITE_URL = "https://example.com"
 DEMO_MARKER = "Demo result — not a live browser check. Live Playwright runs require a local or full deployment."
+DEMO_NAME_PREFIX = "[Demo]"
+
+
+def is_demo_website_name(name: str | None) -> bool:
+    """True for seeded portfolio sample sites (not the user's live product)."""
+    return bool(name) and name.strip().startswith(DEMO_NAME_PREFIX)
+
+
+def is_demo_check_result(error_message: str | None) -> bool:
+    """True when the check row is sample/portfolio data, not a live browser run."""
+    if not error_message:
+        return False
+    return error_message.startswith("Demo result — not a live browser check")
 
 
 async def ensure_public_shell_demo(

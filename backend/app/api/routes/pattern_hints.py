@@ -27,6 +27,7 @@ from app.services.pattern_hints import (
     default_pattern_sample_limit,
     pattern_provider_from_settings,
 )
+from app.services.public_demo import is_demo_website_name
 
 logger = logging.getLogger(__name__)
 
@@ -144,12 +145,21 @@ async def create_pattern_hints(
         response.status_code = 200
         return existing
 
-    if resolved is None:
+    active = resolved
+    if is_demo_website_name(website.name):
+        active = pattern_provider_from_settings(
+            analysis_provider="simulated",
+            api_key=None,
+            model="simulated-local",
+            timeout_seconds=30,
+            max_output_tokens=1200,
+        )
+    if active is None:
         raise HTTPException(status_code=503, detail=_OPENAI_UNCONFIGURED)
 
     evidence = build_pattern_evidence(checks, window=window_name, sample_limit=limit)
     try:
-        result = await resolved.provider.analyze(evidence)
+        result = await active.provider.analyze(evidence)
     except AnalysisProviderError as exc:
         raise HTTPException(status_code=502, detail=exc.message) from exc
 
@@ -161,8 +171,8 @@ async def create_pattern_hints(
         failure_count=sum(1 for row in checks if row.outcome == "failed"),
         latest_check_id=latest_id,
         result=result,
-        model_name=resolved.model_name,
-        provider_name=resolved.provider_name,
+        model_name=active.model_name,
+        provider_name=active.provider_name,
     )
 
     if existing is not None:

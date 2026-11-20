@@ -1,11 +1,11 @@
-"""Public shell: no live Chromium, closed registration, simulated AI."""
+"""Public shell: no live Chromium, closed registration; demo AI stays simulated."""
 
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.config import Settings, get_settings
+from app.core.config import DEFAULT_TOGETHER_MODEL, Settings, get_settings
 from app.core.database import create_db_engine
 from app.services.results import CheckObservation
 
@@ -55,6 +55,8 @@ def test_public_shell_settings_force_safe_defaults(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("PUBLIC_SHELL", "true")
     monkeypatch.setenv("LIVE_BROWSER_ENABLED", "true")
     monkeypatch.setenv("ANALYSIS_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-workspace-key-not-real")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.together.ai/v1")
     monkeypatch.setenv("ALLOW_REGISTRATION", "true")
     monkeypatch.setenv("DATABASE_SSL", "false")
     get_settings.cache_clear()
@@ -63,7 +65,10 @@ def test_public_shell_settings_force_safe_defaults(monkeypatch: pytest.MonkeyPat
         assert settings.public_shell is True
         assert settings.browser_execution_allowed is False
         assert settings.registration_allowed is False
-        assert settings.effective_analysis_provider == "simulated"
+        # Signed-in workspace may use the configured provider (Together/OpenAI).
+        assert settings.effective_analysis_provider == "openai"
+        assert settings.analysis_base_host == "api.together.ai"
+        assert settings.openai_model == DEFAULT_TOGETHER_MODEL
         assert settings.database_ssl_required is False  # explicit DATABASE_SSL=false
     finally:
         get_settings.cache_clear()
@@ -74,7 +79,13 @@ def test_public_shell_defaults_ssl_when_flag_unset(monkeypatch: pytest.MonkeyPat
     monkeypatch.delenv("DATABASE_SSL", raising=False)
     get_settings.cache_clear()
     try:
-        settings = get_settings()
+        # Ignore repo .env DATABASE_SSL so the public_shell default (TLS on) applies.
+        settings = Settings(
+            _env_file=None,
+            public_shell=True,
+            database_url="postgresql+asyncpg://sentinel:sentinel@localhost:5432/sentinel",
+        )
+        assert settings.database_ssl is None
         assert settings.database_ssl_required is True
     finally:
         get_settings.cache_clear()
@@ -99,20 +110,22 @@ def test_health_reports_public_shell(public_shell_client: TestClient) -> None:
     body = response.json()
     assert body["public_shell"] is True
     assert body["live_browser_enabled"] is False
-    assert body["analysis_provider"] == "simulated"
-    assert body["analysis_model"] == "simulated-local"
-    assert body["analysis_base_host"] is None
+    # Workspace provider is configured (Together-compatible); demo rows stay simulated
+    # in the analysis routes, not via this health field.
+    assert body["analysis_provider"] == "openai"
+    assert body["analysis_model"] == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    assert body["analysis_base_host"] == "api.together.ai"
     assert body["registration_open"] is False
 
 
-def test_public_shell_analysis_never_calls_external_ai(
+def test_public_shell_demo_analysis_stays_simulated(
     public_shell_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Portfolio demo must stay simulated even with Together keys/base_url set."""
+    """Seeded portfolio demo checks must stay simulated even with Together keys set."""
 
     def boom_openai(*_args, **_kwargs):
-        raise AssertionError("AsyncOpenAI must not be constructed in public shell")
+        raise AssertionError("AsyncOpenAI must not be constructed for demo checks")
 
     import openai
 
@@ -127,8 +140,9 @@ def test_public_shell_analysis_never_calls_external_ai(
     websites = public_shell_client.get("/api/websites")
     assert websites.status_code == 200
     sites = websites.json()
-    assert sites, "public shell should seed a demo website"
-    website_id = sites[0]["id"]
+    demo_sites = [site for site in sites if site["name"].startswith("[Demo]")]
+    assert demo_sites, "public shell should seed a demo website"
+    website_id = demo_sites[0]["id"]
 
     checks = public_shell_client.get(f"/api/websites/{website_id}/checks")
     assert checks.status_code == 200
@@ -142,6 +156,92 @@ def test_public_shell_analysis_never_calls_external_ai(
     assert body["provider"] == "simulated"
     assert body["model_name"] == "simulated-local"
     assert "SIMULATED" in body["limitations"].upper() or "simulated" in body["summary"].lower()
+
+
+def test_public_shell_workspace_analysis_uses_configured_provider(
+    public_shell_client: TestClient,
+) -> None:
+    """Non-demo failed checks on the public shell use the configured openai provider."""
+    import asyncio
+
+    import asyncpg
+
+    from app.services.failure_analysis import FailureAnalysisResult, PossibleCause
+
+    class RecordingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def analyze(self, evidence: dict[str, object]) -> FailureAnalysisResult:
+            self.calls += 1
+            return FailureAnalysisResult(
+                summary="Workspace analysis via configured provider.",
+                severity="medium",
+                confirmed_observations=["HTTP status was 503"],
+                possible_causes=[
+                    PossibleCause(
+                        cause="Upstream outage",
+                        confidence="medium",
+                        evidence="HTTP 503",
+                    )
+                ],
+                recommended_investigation_steps=["Check origin health"],
+                limitations="Test provider — not a live model call.",
+            )
+
+    provider = RecordingProvider()
+    public_shell_client.app.state.analysis_provider = provider
+    public_shell_client.app.state.analysis_provider_name = "openai"
+    public_shell_client.app.state.analysis_model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+
+    login = public_shell_client.post(
+        "/api/auth/login",
+        json={"email": "demo@sentinel.local", "password": "demo-password-change-me"},
+    )
+    assert login.status_code == 200, login.text
+
+    created = public_shell_client.post(
+        "/api/websites",
+        json={"name": "Private workspace site", "base_url": f"https://example.com/{uuid4().hex}"},
+    )
+    assert created.status_code == 201, created.text
+    site = created.json()
+    website_id = site["id"]
+    base_url = site["base_url"]
+    check_id = str(uuid4())
+
+    # Insert via a fresh asyncpg connection (avoids TestClient event-loop reuse).
+    dsn = get_settings().database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    async def _insert_failed_check() -> None:
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute(
+                """
+                INSERT INTO website_checks (
+                    id, website_id, outcome, http_status, page_title, final_url,
+                    duration_ms, console_errors, failed_requests, error_message, created_at
+                ) VALUES (
+                    $1::uuid, $2::uuid, 'failed', 503, NULL, $3,
+                    90, '[]'::jsonb, '[]'::jsonb, $4, NOW()
+                )
+                """,
+                check_id,
+                website_id,
+                base_url,
+                "The page responded with HTTP 503.",
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(_insert_failed_check())
+
+    response = public_shell_client.post(f"/api/checks/{check_id}/analysis")
+    assert response.status_code in {200, 201}, response.text
+    body = response.json()
+    assert provider.calls == 1
+    assert body["provider"] == "openai"
+    assert body["model_name"] == "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
 
 
 def test_registration_blocked(public_shell_client: TestClient) -> None:

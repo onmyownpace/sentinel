@@ -95,6 +95,53 @@ nav a.nav-active {
   user-select: none;
 }
 
+.site-footer {
+  max-width: 56rem;
+  margin: 2.5rem auto 0;
+  padding: 1rem 1.25rem 2rem;
+  border-top: 1px solid var(--line);
+}
+
+.demo-chip {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  vertical-align: middle;
+}
+
+.portfolio-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.25rem 0 0;
+}
+
+.portfolio-cta-primary,
+.portfolio-cta-secondary {
+  display: inline-block;
+  padding: 0.55rem 1rem;
+  border-radius: 0.55rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.portfolio-cta-primary {
+  background: color-mix(in srgb, #1692a8 85%, #0b3a44);
+  color: #f4fbfd;
+}
+
+.portfolio-cta-secondary {
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
 .nav-user {
   color: var(--muted);
   font-size: 0.92rem;

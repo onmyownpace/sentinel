@@ -10,24 +10,21 @@ export function SiteHeader() {
 
   return (
     <header className="site-header">
-      <Link href="/" className="brand">
+      <Link href="/dashboard" className="brand">
         Sentinel
       </Link>
       <nav aria-label="Primary">
-        <Link href="/" className={navClass(pathname, "/", true)}>
-          Explore demo
-        </Link>
-        <span className="nav-sep" aria-hidden="true">
-          |
-        </span>
         <Link href="/dashboard" className={navClass(pathname, "/dashboard")}>
           Dashboard
         </Link>
         <Link href="/websites" className={navClass(pathname, "/websites")}>
           Websites
         </Link>
-        <Link href="/status" className={navClass(pathname, "/status")}>
-          Status
+        <span className="nav-sep" aria-hidden="true">
+          |
+        </span>
+        <Link href="/" className={navClass(pathname, "/", true)}>
+          Demo
         </Link>
         <AuthNav />
       </nav>

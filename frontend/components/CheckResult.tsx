@@ -26,7 +26,8 @@ export function CheckResult({
     <div className="check-result">
       {isDemo ? (
         <p className="banner warn tight" role="status">
-          Demo result — not a live browser check
+          <span className="demo-chip">Demo</span> Sample result — not a live browser check or
+          live monitoring product
         </p>
       ) : null}
       <p className={outcomeClass}>

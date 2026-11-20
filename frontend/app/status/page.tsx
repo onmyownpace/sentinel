@@ -12,17 +12,20 @@ function tone(value: string | null | undefined): string {
   return "bad";
 }
 
-export default async function HomePage() {
+export default async function StatusPage() {
   const snapshot = await getApiSnapshot();
   const database = snapshot.readiness?.checks.database ?? null;
 
   return (
     <main>
-      <h1>Sentinel</h1>
-      <p>
-        This page asks the API whether the process is up and whether
-        PostgreSQL answered a connectivity check.
-      </p>
+      <header className="workspace-hero">
+        <p className="workspace-kicker">Diagnostics</p>
+        <h1>Status</h1>
+        <p>
+          Operator view of API process liveness and PostgreSQL readiness. This is not the
+          product dashboard — use Dashboard for monitoring.
+        </p>
+      </header>
 
       <section className="card" aria-label="Runtime status">
         <h2>Runtime status</h2>

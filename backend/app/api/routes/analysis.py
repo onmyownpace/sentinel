@@ -28,6 +28,7 @@ from app.services.failure_analysis import (
     build_evidence,
     provider_from_settings,
 )
+from app.services.public_demo import is_demo_check_result
 
 logger = logging.getLogger(__name__)
 
@@ -126,16 +127,28 @@ async def create_analysis(
             status_code=422,
             detail="Only failed checks can be analyzed.",
         )
-    if resolved is None:
+
+    # Portfolio/demo sample checks never call paid AI, even when the workspace
+    # is configured for Together/OpenAI on the public shell.
+    active = resolved
+    if is_demo_check_result(check.error_message):
+        active = provider_from_settings(
+            analysis_provider="simulated",
+            api_key=None,
+            model="simulated-local",
+            timeout_seconds=30,
+            max_output_tokens=1200,
+        )
+    if active is None:
         raise HTTPException(status_code=503, detail=_OPENAI_UNCONFIGURED)
 
     evidence = build_evidence(check)
     try:
-        result = await resolved.provider.analyze(evidence)
+        result = await active.provider.analyze(evidence)
     except AnalysisProviderError as exc:
         raise HTTPException(status_code=502, detail=exc.message) from exc
 
-    row = _row_from_result(check_id, result, resolved.model_name, resolved.provider_name)
+    row = _row_from_result(check_id, result, active.model_name, active.provider_name)
     session.add(row)
     try:
         await session.commit()

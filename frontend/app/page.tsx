@@ -9,18 +9,40 @@ export default function HomePage() {
   return (
     <main className="portfolio-demo">
       <header className="portfolio-intro">
-        <span className="portfolio-badge">Read-only demo</span>
+        <span className="portfolio-badge">Demo · sample data</span>
         <h1>Website monitoring</h1>
-        <p>Explore a sample check history and see how Sentinel explains a failure.</p>
+        <p>
+          This page shows sample portfolio data only — not your live monitoring product.
+          Sign in for the signed-in workspace (Dashboard).
+        </p>
+        <p className="portfolio-cta">
+          <Link className="portfolio-cta-primary" href="/dashboard">
+            Open Dashboard
+          </Link>
+          <Link className="portfolio-cta-secondary" href="/login">
+            Sign in
+          </Link>
+        </p>
       </header>
 
       <section className="card portfolio-checks" aria-labelledby="sample-site">
-        <h2 id="sample-site">Example status page</h2>
-        <p className="hint">example.com · Sample data</p>
+        <h2 id="sample-site">
+          <span className="demo-chip">Demo</span> Example status page
+        </h2>
+        <p className="hint">example.com · Sample portfolio data (not live checks)</p>
         <div className="portfolio-metrics">
-          <div><strong>2</strong><span>Checks</span></div>
-          <div><strong>1</strong><span>Failure</span></div>
-          <div><strong>115 ms</strong><span>Average response</span></div>
+          <div>
+            <strong>2</strong>
+            <span>Checks</span>
+          </div>
+          <div>
+            <strong>1</strong>
+            <span>Failure</span>
+          </div>
+          <div>
+            <strong>115 ms</strong>
+            <span>Average response</span>
+          </div>
         </div>
         <h3>Check history</h3>
         {sampleChecks.map(({ status, label, duration, failed }) => (
@@ -32,8 +54,11 @@ export default function HomePage() {
             </summary>
             {failed ? (
               <div className="portfolio-analysis">
-                <strong>Sample failure analysis</strong>
-                <p>The server returned HTTP 503. Check service health and recent deployments before retrying.</p>
+                <strong>Demo failure analysis (simulated)</strong>
+                <p>
+                  The server returned HTTP 503. Check service health and recent deployments
+                  before retrying. This explanation is sample text — not a paid AI call.
+                </p>
               </div>
             ) : (
               <p className="portfolio-analysis">The sample homepage returned HTTP 200.</p>
@@ -62,7 +87,6 @@ export default function HomePage() {
           </article>
         </div>
       </section>
-      <p className="hint"><Link href="/login">Sign in to your workspace</Link></p>
     </main>
   );
 }
